@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ESP32 Bulldozer BLE Control</title>
+    <style>
+        :root { --control-size: 90vh; --gap-size: 10px; }
+        body {
+            font-family: -apple-system, sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; width: 100vw; margin: 0; background-color: #f0f0f0;
+            touch-action: none; overflow: hidden; text-align: center;
+            gap: 20px; padding: 10px; box-sizing: border-box;
+        }
+        #connection-status {
+            position: absolute; top: 10px; left: 10px;
+            font-size: 0.9em; font-weight: bold; color: #555;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 5px 10px; border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000; pointer-events: none;
+        }
+        /* Bluetooth接続ボタン */
+        #connect-btn {
+            position: absolute; top: 10px; right: 10px;
+            font-size: 1em; font-weight: bold; color: white;
+            background-color: #007aff; border: none;
+            padding: 10px 15px; border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            z-index: 1000; cursor: pointer; transition: background-color 0.3s;
+        }
+        .panel { display: flex; flex-direction: column; align-items: center; height: 100%; }
+        #left-panel { flex-grow: 1; height: 90%; justify-content: space-between; }
+        #timed-buttons-container { display: flex; flex-direction: column; align-items: center; gap: 15px; width: 100%; }
+        .timed-button {
+            width: 80%; max-width: 250px; padding: 10px 5px; font-size: 1.1em;
+            border-radius: 15px; border: none; color: white; cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .timed-button:disabled { background-color: #aaa; cursor: not-allowed; }
+        #timed-forward { background-color: #34c759; }
+        #timed-backward { background-color: #ff9500; }
+        #slider-container { width: 80%; max-width: 250px; }
+        #speedSlider { width: 100%; cursor: pointer; }
+        #speedValue { font-size: 1.2em; margin-top: 10px; color: #555; }
+        #right-panel { flex-shrink: 0; width: var(--control-size); height: var(--control-size); justify-content: center; }
+        #controller-container {
+            display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
+            width: 100%; height: 100%; gap: var(--gap-size);
+        }
+        .control-button {
+            font-size: 4em; border: none; border-radius: 20px; background-color: #fff;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15); cursor: pointer;
+            user-select: none; -webkit-user-select: none;
+            display: flex; justify-content: center; align-items: center;
+            transition: background-color 0.1s, transform 0.1s;
+        }
+        .control-button:active, .control-button.active { background-color: #007aff; color: white; transform: scale(0.95); }
+        #up { grid-area: 1 / 2 / 2 / 3; }
+        #left { grid-area: 2 / 1 / 3 / 2; }
+        #stop { grid-area: 2 / 2 / 3 / 3; background-color: #ff3b30; color: white;}
+        #right { grid-area: 2 / 3 / 3 / 4; }
+        #down { grid-area: 3 / 2 / 4 / 3; }
+        .placeholder { visibility: hidden; }
+    </style>
+</head>
+<body>
+    <div id="connection-status">通信: 切断 (未接続)</div>
+    <button id="connect-btn">Bluetooth接続</button>
+
+    <div id="left-panel" class="panel">
+        <div id="timed-buttons-container">
+            <button id="timed-forward" class="timed-button">5秒 前進</button>
+            <button id="timed-backward" class="timed-button">5秒 後退</button>
+        </div>
+        <div id="slider-container">
+            <label for="speedSlider">デューティ比</label>
+            <input type="range" id="speedSlider" min="0" max="255" value="200">
+            <div id="speedValue">200</div>
+        </div>
+    </div>
+
+    <div id="right-panel" class="panel">
+        <div id="controller-container">
+            <div class="placeholder"></div>
+            <button id="up" class="control-button">▲</button>
+            <div class="placeholder"></div>
+            <button id="left" class="control-button">◀</button>
+            <button id="stop" class="control-button">■</button>
+            <button id="right" class="control-button">▶</button>
+            <div class="placeholder"></div>
+            <button id="down" class="control-button">▼</button>
+            <div class="placeholder"></div>
+        </div>
+    </div>
+
+    <script>
+        const buttons = document.querySelectorAll('.control-button');
+        const timedForwardBtn = document.getElementById('timed-forward');
+        const timedBackwardBtn = document.getElementById('timed-backward');
+        const speedSlider = document.getElementById('speedSlider');
+        const speedValue = document.getElementById('speedValue');
+        const statusDiv = document.getElementById('connection-status');
+        const connectBtn = document.getElementById('connect-btn');
+
+        let currentDirection = 'stop';
+        let currentSpeed = speedSlider.value;
+        
+        let isSending = false;
+        let pendingCommand = null;
+
+        // --- Web Bluetooth API 関連 ---
+        let bluetoothDevice;
+        let txCharacteristic;
+        let isConnected = false;
+
+        connectBtn.addEventListener('click', async () => {
+            if (isConnected) return;
+            try {
+                // デバイス検索 (名前がESP32-Bulldozerのもの)
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ESP32-Bulldozer' }],
+                    optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
+                });
+                
+                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+                
+                // 接続処理
+                const server = await bluetoothDevice.gatt.connect();
+                const service = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
+                txCharacteristic = await service.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
+                
+                isConnected = true;
+                connectBtn.style.backgroundColor = '#34c759';
+                connectBtn.textContent = '接続済み';
+                statusDiv.textContent = '通信: 良好 (BLE)';
+                statusDiv.style.color = '#34c759';
+            } catch(error) {
+                console.error(error);
+                statusDiv.textContent = '接続キャンセル/失敗';
+                statusDiv.style.color = '#ff3b30';
+            }
+        });
+
+        function onDisconnected() {
+            isConnected = false;
+            connectBtn.style.backgroundColor = '#007aff';
+            connectBtn.textContent = 'Bluetooth接続';
+            statusDiv.textContent = '通信: 切断';
+            statusDiv.style.color = '#ff3b30';
+            txCharacteristic = null;
+        }
+
+        // --- BLE経由でコマンド送信 ---
+        async function sendCommand(direction, speed) {
+            if (!isConnected || !txCharacteristic) return;
+
+            if (isSending) {
+                pendingCommand = { direction, speed };
+                return;
+            }
+            
+            isSending = true;
+            try {
+                // "up:200" のような文字列にして送信
+                const commandString = `${direction}:${speed}`;
+                const encoder = new TextEncoder();
+                await txCharacteristic.writeValue(encoder.encode(commandString));
+            } catch (err) {
+                console.error("通信エラー:", err);
+            } finally {
+                isSending = false;
+                if (pendingCommand) {
+                    const nextCmd = pendingCommand;
+                    pendingCommand = null;
+                    setTimeout(() => {
+                        sendCommand(nextCmd.direction, nextCmd.speed);
+                    }, 20); // 連続送信の間隔
+                }
+            }
+        }
+
+        // --- ハートビート（Ping）処理 ---
+        async function checkConnection() {
+            if (!isConnected || !txCharacteristic) return;
+            try {
+                const encoder = new TextEncoder();
+                await txCharacteristic.writeValue(encoder.encode('ping'));
+            } catch (err) {
+                onDisconnected();
+            }
+        }
+        setInterval(checkConnection, 1000); // 1秒ごとにPingを送信
+
+        // --- UIイベントリスナー ---
+        buttons.forEach(button => {
+            const direction = button.id;
+            button.addEventListener('mousedown', (e) => startMove(e, direction));
+            button.addEventListener('touchstart', (e) => startMove(e, direction), {passive: false});
+            
+            button.addEventListener('mouseup', stopMove);
+            button.addEventListener('mouseleave', stopMove);
+            button.addEventListener('touchend', stopMove);
+            button.addEventListener('touchcancel', stopMove);
+        });
+
+        function startMove(e, direction) {
+            e.preventDefault();
+            if (currentDirection !== direction) {
+                currentDirection = direction;
+                buttons.forEach(btn => btn.classList.remove('active'));
+                if(direction !== 'stop') {
+                    document.getElementById(direction).classList.add('active');
+                }
+                sendCommand(currentDirection, currentSpeed);
+            }
+        }
+
+        function stopMove(e) {
+            if(e) e.preventDefault();
+            if (currentDirection !== 'stop') {
+                currentDirection = 'stop';
+                buttons.forEach(btn => btn.classList.remove('active'));
+                sendCommand('stop', currentSpeed);
+            }
+        }
+        
+        timedForwardBtn.addEventListener('click', () => handleTimedMove('timed-forward', 5000));
+        timedBackwardBtn.addEventListener('click', () => handleTimedMove('timed-backward', 5000));
+
+        function handleTimedMove(direction, duration) {
+            sendCommand(direction, currentSpeed);
+            timedForwardBtn.disabled = true;
+            timedBackwardBtn.disabled = true;
+            setTimeout(() => {
+                timedForwardBtn.disabled = false;
+                timedBackwardBtn.disabled = false;
+                stopMove();
+            }, duration);
+        }
+
+        speedSlider.addEventListener('input', () => {
+            currentSpeed = speedSlider.value;
+            speedValue.textContent = currentSpeed;
+        });
+
+        speedSlider.addEventListener('change', () => {
+            if (currentDirection !== 'stop') {
+                sendCommand(currentDirection, currentSpeed);
+            }
+        });
+    </script>
+</body>
+</html>
