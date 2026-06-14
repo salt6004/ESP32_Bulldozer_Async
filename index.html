@@ -262,9 +262,10 @@
             <div class="d-pad-container">
                 <div class="panel-label">Drive Control</div>
                 <div class="d-pad">
+                    <!-- ★ id="stop" から control-button クラスを外しました -->
                     <button id="up"    class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M12 4l-8 8h6v8h4v-8h6z"/></svg></button>
                     <button id="left"  class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M4 12l8 8v-6h8v-4h-8V4z"/></svg></button>
-                    <button id="stop"  class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+                    <button id="stop"  class="dir-btn"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
                     <button id="right" class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M20 12l-8-8v6H4v4h8v6z"/></svg></button>
                     <button id="down"  class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M12 20l8-8h-6V4h-4v8H4z"/></svg></button>
                 </div>
@@ -291,7 +292,6 @@
     const MAX_RECONNECT_ATTEMPTS = 5;
     let reconnectAttempts = 0;
 
-    // ★ UIステート更新をひとつの関数に集約
     function setUIState(state) {
         statusLed.className = 'led';
         connectBtn.className = '';
@@ -321,7 +321,6 @@
     async function connectBLE() {
         try {
             if (!bluetoothDevice) {
-                // 初回: ユーザーにデバイス選択ダイアログを表示
                 bluetoothDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ name: 'ESP32-Bulldozer' }],
                     optionalServices: [SERVICE_UUID]
@@ -353,13 +352,11 @@
         }
     }
 
-    // ★ 切断時に自動再接続をスケジュール
     function onDisconnected() {
         isConnected      = false;
         rxCharacteristic = null;
         console.log('[BLE] Disconnected');
 
-        // 走行中なら操作をリセット
         stopMove();
 
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -373,7 +370,6 @@
 
     function scheduleReconnect() {
         reconnectAttempts++;
-        // 指数バックオフ: 1秒 → 2秒 → 4秒 → …（最大8秒）
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000);
         console.log(`[BLE] Reconnect attempt ${reconnectAttempts} in ${delay}ms`);
         reconnectTimer = setTimeout(connectBLE, delay);
@@ -382,24 +378,23 @@
     connectBtn.addEventListener('click', () => {
         if (isConnected || isReconnecting) return;
         reconnectAttempts = 0;
-        bluetoothDevice   = null;  // 再選択させる
+        bluetoothDevice   = null;  
         setUIState('reconnecting');
         connectBLE();
     });
 
     // =========================================================================
-    // コマンド送信キュー (WriteWithoutResponse + 非同期キュー)
+    // コマンド送信キュー 
     // =========================================================================
     let isSending     = false;
-    let pendingCmd    = null;  // 最新コマンドだけを保持（古いものは上書き）
+    let pendingCmd    = null;  
 
     async function sendCommand(direction, speed) {
         if (!isConnected || !rxCharacteristic) return;
 
-        // ★ キューに積む（古いpendingは捨てて最新優先）
         pendingCmd = { direction, speed };
 
-        if (isSending) return;  // 送信中なら次の送信完了時に処理される
+        if (isSending) return; 
         isSending = true;
 
         while (pendingCmd) {
@@ -411,13 +406,10 @@
                 await rxCharacteristic.writeValueWithoutResponse(data);
             } catch (err) {
                 console.error('[BLE] Send error:', err);
-                // 送信失敗 = 切断とみなしてフロー終了
                 isSending = false;
                 return;
             }
 
-            // ★ 連続送信の間隔を20msに設定
-            //    WriteWithoutResponseでも短すぎると内部バッファがあふれる
             if (pendingCmd) await sleep(20);
         }
 
@@ -429,10 +421,8 @@
     }
 
     // =========================================================================
-    // ハートビート (ping) — 2秒ごとに送信
+    // ハートビート (ping)
     // =========================================================================
-    // ★ 1秒→2秒に変更: pingが多すぎると通信帯域を圧迫する
-    //    ESP32側のFAILSAFE_TIMEOUT=3秒に対して余裕を持たせる
     setInterval(async () => {
         if (!isConnected || !rxCharacteristic || isSending) return;
         try {
@@ -446,7 +436,8 @@
     // =========================================================================
     // 操作UI
     // =========================================================================
-    const buttons     = document.querySelectorAll('.control-button');
+    const buttons     = document.querySelectorAll('.control-button'); // stopを含まない
+    const stopBtn     = document.getElementById('stop'); // ★ 緊急停止ボタンを単独で取得
     const timedFwdBtn = document.getElementById('timed-forward');
     const timedRevBtn = document.getElementById('timed-backward');
     const speedSlider = document.getElementById('speedSlider');
@@ -454,6 +445,7 @@
 
     let currentDirection = 'stop';
     let currentSpeed     = parseInt(speedSlider.value);
+    let timedMoveTimeout = null; // ★ 自動走行のタイマーを管理
 
     function startMove(direction) {
         if (currentDirection === direction) return;
@@ -467,9 +459,19 @@
         if (currentDirection === 'stop') return;
         currentDirection = 'stop';
         buttons.forEach(b => b.classList.remove('active'));
-        sendCommand('stop', currentSpeed);
+        
+        // ★ 自動走行タイマーが動いていたらキャンセルしてUIを元に戻す
+        if (timedMoveTimeout) {
+            clearTimeout(timedMoveTimeout);
+            timedMoveTimeout = null;
+            timedFwdBtn.disabled = false;
+            timedRevBtn.disabled = false;
+        }
+        
+        sendCommand('stop', 0); // 確実に速度0で送信
     }
 
+    // 通常の方向キー（押したら進む、離したら止まる）
     buttons.forEach(btn => {
         const dir = btn.id;
         btn.addEventListener('mousedown',   e => { e.preventDefault(); startMove(dir); });
@@ -480,13 +482,29 @@
         btn.addEventListener('touchcancel', e => { e.preventDefault(); stopMove(); });
     });
 
+    // ★ 緊急停止ボタン（押した瞬間だけ反応し、強制停止する）
+    function triggerEmergencyStop(e) {
+        if (e) e.preventDefault();
+        stopMove();
+        // 押したフィードバックのアニメーションを一瞬だけ見せる
+        stopBtn.classList.add('active');
+        setTimeout(() => stopBtn.classList.remove('active'), 200);
+    }
+    stopBtn.addEventListener('mousedown', triggerEmergencyStop);
+    stopBtn.addEventListener('touchstart', triggerEmergencyStop, { passive: false });
+
+    // 自動走行
     function handleTimedMove(direction, duration) {
+        if (timedMoveTimeout) clearTimeout(timedMoveTimeout);
         sendCommand(direction, currentSpeed);
+        currentDirection = direction;
         timedFwdBtn.disabled = true;
         timedRevBtn.disabled = true;
-        setTimeout(() => {
+        
+        timedMoveTimeout = setTimeout(() => {
             timedFwdBtn.disabled = false;
             timedRevBtn.disabled = false;
+            timedMoveTimeout = null;
             stopMove();
         }, duration);
     }
@@ -510,12 +528,17 @@
         'ArrowUp':'up',   'w':'up',   'W':'up',
         'ArrowDown':'down','s':'down','S':'down',
         'ArrowLeft':'left','a':'left','A':'left',
-        'ArrowRight':'right','d':'right','D':'right',
-        ' ':'stop'
+        'ArrowRight':'right','d':'right','D':'right'
     };
     let activeKey = null;
 
     document.addEventListener('keydown', e => {
+        if (e.key === ' ') { // スペースキーを緊急停止に割り当て
+            e.preventDefault();
+            triggerEmergencyStop();
+            return;
+        }
+        
         if (activeKey === e.key) return;
         const dir = keyMap[e.key];
         if (dir) { e.preventDefault(); activeKey = e.key; startMove(dir); }
