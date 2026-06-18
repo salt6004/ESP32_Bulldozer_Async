@@ -251,27 +251,44 @@
             isExecuting = true;
             abortExecution = false;
             setExecutionMode(true);
-            showToast("スタート！", "bg-emerald-500");
+            showToast("プログラムをそうしん中...", "bg-blue-500");
 
+            // 1. ESP32側のプログラムメモリをクリア
+            await sendCommandToESP32("CLR:0");
+            await sleep(100);
+
+            // 2. すべてのブロックの命令を一気に送信
+            const speed = document.getElementById('pwm-speed').value;
             for (let i = 0; i < program.length; i++) {
                 if (abortExecution) break; 
                 const block = program[i];
+                // "ADD:F:200:1000" のような形で送る
+                await sendCommandToESP32(`ADD:${block.id}:${speed}:${block.timeMs}`);
+                await sleep(40); // 送信詰まり防止
+            }
+
+            if (abortExecution) {
+                setExecutionMode(false);
+                isExecuting = false;
+                return;
+            }
+
+            // 3. 実行スタートの合図を送る
+            await sendCommandToESP32("RUN:0");
+            showToast("ロボットが動きます！", "bg-emerald-500");
+
+            // 4. UI側は通信に関係なく、時間に合わせてアニメーションを進める
+            for (let i = 0; i < program.length; i++) {
+                if (abortExecution) break; 
                 highlightBlock(i);
                 
                 const blockEl = document.getElementById(`block-${i}`);
                 if(blockEl) blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-                if (block.id === 'W' || block.id === 'S') {
-                    await sendCommandToESP32('S'); 
-                    await sleepWithAbort(block.timeMs);
-                } else {
-                    await sendCommandToESP32(block.id);
-                    await sleepWithAbort(block.timeMs);
-                }
+                await sleepWithAbort(program[i].timeMs);
             }
 
             if (!abortExecution) {
-                await sendCommandToESP32('S');
                 showToast("おわりました！", "bg-emerald-500");
             }
             
@@ -282,7 +299,7 @@
 
         async function emergencyStop() {
             abortExecution = true;
-            await sendCommandToESP32('S');
+            await sendCommandToESP32('S:0'); // 緊急停止
             removeHighlight();
             setExecutionMode(false);
             isExecuting = false;
@@ -354,11 +371,12 @@
         // ==========================================
         // Web Bluetooth API (通信処理)
         // ==========================================
-        const SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214";
-        const CMD_CHAR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214";
+        const SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
+        const CMD_CHAR_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
         
         let bleDevice = null;
         let cmdCharacteristic = null;
+        let reconnectTimer = null;
 
         async function toggleBluetooth() {
             if (bleDevice && bleDevice.gatt.connected) {
@@ -378,6 +396,7 @@
                     cmdCharacteristic = await service.getCharacteristic(CMD_CHAR_UUID);
                     
                     updateBleUI(true);
+                    if (reconnectTimer) clearTimeout(reconnectTimer);
                     showToast("つながりました！", "bg-blue-600");
                 } catch (error) {
                     console.error(error);
@@ -391,8 +410,26 @@
         function onDisconnected() {
             cmdCharacteristic = null;
             updateBleUI(false);
-            if(isExecuting) emergencyStop(); // 実行中に切れたら停止させる
-            showToast("きれました", "bg-gray-600");
+            showToast("きれました。さいせつぞく中...", "bg-orange-500");
+            
+            // 自動再接続を開始
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(attemptReconnect, 2000);
+        }
+
+        async function attemptReconnect() {
+            if (!bleDevice) return;
+            try {
+                console.log("再接続を試みます...");
+                const server = await bleDevice.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                cmdCharacteristic = await service.getCharacteristic(CMD_CHAR_UUID);
+                updateBleUI(true);
+                showToast("さいせつぞくしました！", "bg-blue-600");
+            } catch (error) {
+                console.warn("再接続失敗、リトライします...", error);
+                reconnectTimer = setTimeout(attemptReconnect, 3000);
+            }
         }
 
         function updateBleUI(connected) {
@@ -427,12 +464,28 @@
             }
         }
 
-        // 2秒ごとにPingを送り、ESP32側のフェイルセーフ(3秒)を回避する
+        // ESP32へのコマンド送信 ("S:0" や "ADD:F:200:1000" など)
+        async function sendCommandToESP32(commandString) {
+            if (!cmdCharacteristic) return;
+            
+            try {
+                const encoder = new TextEncoder();
+                await cmdCharacteristic.writeValue(encoder.encode(commandString));
+            } catch (error) {
+                console.warn("送信エラー:", error);
+                // 送信失敗した場合は切断処理
+                if (bleDevice && bleDevice.gatt.connected) {
+                    bleDevice.gatt.disconnect();
+                }
+            }
+        }
+
+        // 1秒ごとにPingを送り、ESP32側のフェイルセーフ(3秒)を回避する
         setInterval(() => {
             if (bleDevice && bleDevice.gatt.connected && !isExecuting) {
-                sendCommandToESP32('P');
+                sendCommandToESP32('ping');
             }
-        }, 2000);
+        }, 1000);
 
     </script>
 </body>
