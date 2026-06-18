@@ -3,495 +3,550 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ラジコンプログラミング (Bluetooth)</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
-    
+    <title>ESP32 Bulldozer Pro Controller</title>
     <style>
+        :root {
+            --primary-yellow: #FFB300;
+            --dark-bg: #1A1A1D;
+            --panel-bg: #222224;
+            --danger-red: #D32F2F;
+            --success-green: #388E3C;
+            --warning-orange: #F57C00;
+            --text-muted: #888;
+        }
+
         body {
-            font-family: 'M PLUS Rounded 1c', sans-serif;
-            background-color: #f0fdf4;
+            background-color: var(--dark-bg);
+            background-image: 
+                linear-gradient(45deg, #151515 25%, transparent 25%, transparent 75%, #151515 75%, #151515), 
+                linear-gradient(45deg, #151515 25%, transparent 25%, transparent 75%, #151515 75%, #151515);
+            background-size: 8px 8px;
+            background-position: 0 0, 4px 4px;
+            color: #fff;
+            font-family: 'SF Pro Display', -apple-system, sans-serif;
             user-select: none;
             -webkit-user-select: none;
-            -webkit-tap-highlight-color: transparent;
+            touch-action: none;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 
-        @keyframes pulse-ring {
-            0% { box-shadow: 0 0 0 0 rgba(253, 224, 71, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(253, 224, 71, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(253, 224, 71, 0); }
+        .header {
+            height: 50px;
+            background: linear-gradient(to bottom, #333, #1a1a1a);
+            border-bottom: 2px solid #000;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.8); z-index: 10;
+            flex-shrink: 0;
         }
-        .executing-block {
-            transform: scale(1.02);
-            border-color: #fde047 !important;
-            animation: pulse-ring 1s infinite;
-            z-index: 10;
+
+        .brand {
+            font-size: 1.2rem; font-weight: 900; color: var(--primary-yellow);
+            letter-spacing: 2px; text-shadow: 1px 1px 0 #000;
+            display: flex; align-items: center; gap: 10px;
+        }
+
+        .status-panel { display: flex; align-items: center; gap: 15px; }
+        
+        .led-container {
+            display: flex; align-items: center; gap: 8px;
+            background: #000; padding: 4px 10px;
+            border-radius: 15px; border: 1px solid #333;
+        }
+        .led {
+            width: 10px; height: 10px; border-radius: 50%;
+            background-color: var(--danger-red);
+            box-shadow: 0 0 8px var(--danger-red);
+            transition: all 0.3s;
+        }
+        .led.connected    { background-color: var(--success-green); box-shadow: 0 0 10px var(--success-green); }
+        .led.reconnecting { background-color: var(--warning-orange); box-shadow: 0 0 10px var(--warning-orange);
+                            animation: blink 0.5s infinite; }
+
+        @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.2; } }
+
+        .status-text { font-size: 0.8rem; font-family: monospace; color: #ccc; min-width: 110px; text-align: center; }
+
+        #connect-btn {
+            background: linear-gradient(to bottom, #444, #222);
+            border: 1px solid #000; color: #fff; padding: 6px 16px;
+            border-radius: 4px; font-weight: bold; font-size: 0.85rem; cursor: pointer;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 2px 4px rgba(0,0,0,0.5);
+            text-transform: uppercase; transition: all 0.2s; white-space: nowrap;
+        }
+        #connect-btn:active { background: #111; box-shadow: inset 0 2px 5px rgba(0,0,0,0.8); }
+        #connect-btn.connected   { color: var(--success-green); border-color: var(--success-green); }
+        #connect-btn.reconnecting{ color: var(--warning-orange); border-color: var(--warning-orange); }
+        #connect-btn:disabled    { opacity: 0.5; cursor: not-allowed; }
+
+        /* コンソール */
+        .console {
+            flex: 1; display: flex; padding: 15px; gap: 15px;
+            box-sizing: border-box; flex-direction: column;
+            min-height: 0;
+        }
+
+        .panel-section {
+            background: var(--panel-bg); border: 2px solid #111; border-radius: 12px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 20px rgba(0,0,0,0.8);
+            padding: 15px; display: flex; position: relative;
+        }
+        .panel-section::before {
+            content: ''; position: absolute; top: 6px; left: 6px; right: 6px; bottom: 6px;
+            border: 1px dashed rgba(255,255,255,0.05); pointer-events: none; border-radius: 6px;
+        }
+
+        .screw {
+            position: absolute; width: 10px; height: 10px; background: #444;
+            border-radius: 50%; box-shadow: inset 0 1px 3px rgba(0,0,0,0.8), 0 1px 0 rgba(255,255,255,0.1);
+        }
+        .screw::after {
+            content: ''; position: absolute; top: 50%; left: 10%; width: 80%; height: 2px;
+            background: #111; transform: translateY(-50%) rotate(45deg);
+        }
+        .screw.tl { top: 12px; left: 12px; } .screw.tr { top: 12px; right: 12px; }
+        .screw.bl { bottom: 12px; left: 12px; } .screw.br { bottom: 12px; right: 12px; }
+
+        .left-panel {
+            flex: 1; display: flex; flex-direction: row;
+            justify-content: space-evenly; align-items: center;
+            max-height: 40%;
+        }
+        .right-panel {
+            flex: 2; display: flex; justify-content: center; align-items: center;
+        }
+
+        @media (orientation: landscape) {
+            .console { flex-direction: row; gap: 20px; }
+            .left-panel { flex: 1; max-width: 40%; max-height: none; }
+            .right-panel { flex: 1; }
+        }
+
+        .throttle-group {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; height: 100%; z-index: 1;
+        }
+        .panel-label {
+            font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;
+            font-weight: bold; margin-bottom: 10px; letter-spacing: 1px;
+        }
+        .slider-wrapper {
+            position: relative; height: 140px; display: flex;
+            align-items: center; justify-content: center;
+            background: #111; padding: 10px 20px; border-radius: 8px;
+            border: 1px solid #333; box-shadow: inset 0 2px 10px rgba(0,0,0,0.8);
+        }
+        input[type=range] {
+            -webkit-appearance: none; background: transparent;
+            width: 140px; transform: rotate(-90deg); outline: none;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 6px; background: #333; border-radius: 3px; border: 1px solid #000;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 30px; width: 40px;
+            background: linear-gradient(to bottom, #ccc, #888);
+            border-radius: 4px; border: 2px solid #222; margin-top: -13px;
+            cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        }
+        #speedValueDisplay {
+            margin-top: 10px; font-family: 'Courier New', Courier, monospace;
+            font-size: 1.5rem; font-weight: bold; color: var(--primary-yellow);
+            background: #0a0a0a; padding: 4px 12px; border-radius: 4px;
+            border: 1px solid #222; box-shadow: inset 0 0 5px rgba(255, 179, 0, 0.2);
+        }
+
+        .macro-group { display: flex; flex-direction: column; gap: 15px; z-index: 1; }
+        .macro-btn {
+            background: repeating-linear-gradient(-45deg, #222, #222 10px, #1a1a1a 10px, #1a1a1a 20px);
+            border: 2px solid #000; color: var(--primary-yellow); padding: 15px; border-radius: 8px;
+            font-weight: 900; font-size: 0.8rem; cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.6); transition: transform 0.1s;
+            text-transform: uppercase; width: 100px;
+        }
+        .macro-btn:active { transform: translateY(4px); box-shadow: 0 0px 2px rgba(0,0,0,0.8); color: #fff; }
+        .macro-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Dパッド */
+        .d-pad-container { z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .d-pad {
+            display: grid;
+            grid-template-columns: repeat(3, 80px);
+            grid-template-rows: repeat(3, 80px);
+            gap: 8px;
+        }
+        .dir-btn {
+            background: linear-gradient(135deg, #4a4a4a, #2a2a2a); border: 2px solid #111; border-radius: 12px;
+            box-shadow: inset 0 2px 0 rgba(255,255,255,0.1), inset 0 -2px 0 rgba(0,0,0,0.4), 0 6px 10px rgba(0,0,0,0.6);
+            color: #ccc; display: flex; justify-content: center; align-items: center;
+            cursor: pointer; transition: all 0.05s; padding: 0; outline: none;
+        }
+        .dir-btn svg { width: 40px; height: 40px; fill: currentColor; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5)); }
+        .dir-btn:active, .dir-btn.active {
+            background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+            box-shadow: inset 0 4px 8px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5);
+            transform: translateY(4px); color: var(--primary-yellow);
+        }
+        .dir-btn#up    { grid-area: 1 / 2 / 2 / 3; border-top-left-radius: 20px; border-top-right-radius: 20px; }
+        .dir-btn#left  { grid-area: 2 / 1 / 3 / 2; border-top-left-radius: 20px; border-bottom-left-radius: 20px; }
+        .dir-btn#right { grid-area: 2 / 3 / 3 / 4; border-top-right-radius: 20px; border-bottom-right-radius: 20px; }
+        .dir-btn#down  { grid-area: 3 / 2 / 4 / 3; border-bottom-left-radius: 20px; border-bottom-right-radius: 20px; }
+        .dir-btn#stop  {
+            grid-area: 2 / 2 / 3 / 3; background: radial-gradient(circle, #E53935, #b71c1c);
+            border-radius: 50%; border: 4px solid #111; color: #fff;
+            box-shadow: inset 0 4px 4px rgba(255,255,255,0.2), 0 6px 10px rgba(0,0,0,0.6);
+        }
+        .dir-btn#stop svg { width: 28px; height: 28px; }
+        .dir-btn#stop:active, .dir-btn#stop.active {
+            background: radial-gradient(circle, #c62828, #7f0000); color: #ccc;
+            box-shadow: inset 0 6px 12px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5);
+        }
+
+        @media (max-width: 500px), (max-height: 500px) {
+            .d-pad { grid-template-columns: repeat(3, 70px); grid-template-rows: repeat(3, 70px); }
+            .dir-btn svg { width: 32px; height: 32px; }
+            .slider-wrapper { height: 120px; }
+            input[type=range] { width: 100px; }
+            .macro-btn { padding: 10px; font-size: 0.75rem; width: 90px; }
+            #speedValueDisplay { font-size: 1.2rem; }
         }
     </style>
 </head>
-<body class="h-screen w-full overflow-hidden text-gray-800 flex justify-center">
-    
-    <div class="w-full max-w-md h-full flex flex-col bg-white shadow-2xl relative">
-        
-        <!-- ヘッダー -->
-        <header class="bg-emerald-500 text-white p-3 flex justify-between items-center shadow-md z-20">
-            <h1 class="text-lg font-extrabold flex items-center gap-2">
-                <i data-lucide="bot" class="w-6 h-6"></i> ラジコンプログラミング
-            </h1>
-            <div class="flex items-center gap-2">
-                <!-- Bluetooth接続ボタン -->
-                <button id="btn-connect" onclick="toggleBluetooth()" class="flex items-center gap-1 bg-gray-400 px-3 py-1.5 rounded-full text-sm font-bold transition-colors active:scale-90 shadow-sm">
-                    <i id="ble-icon" data-lucide="bluetooth" class="w-4 h-4"></i>
-                    <span id="ble-text">つなぐ</span>
-                </button>
-                <button onclick="toggleSettings()" class="p-2 bg-emerald-600 rounded-full active:scale-90 transition-transform">
-                    <i data-lucide="settings" class="w-5 h-5"></i>
-                </button>
-            </div>
-        </header>
+<body>
 
-        <!-- 設定エリア -->
-        <div id="settings-area" class="hidden bg-emerald-50 p-4 border-b-2 border-emerald-200 z-10 shadow-inner">
-            <div>
-                <div class="flex justify-between mb-1">
-                    <label class="text-sm font-bold text-emerald-800">モーターのはやさ (0〜255)</label>
-                    <span id="pwm-display" class="font-bold text-emerald-700">200</span>
+    <div class="header">
+        <div class="brand">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M19 15v4H5v-4h14m1-2H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 18.5c-.82 0-1.5-.68-1.5-1.5s.68-1.5 1.5-1.5 1.5.68 1.5 1.5-.68 1.5-1.5 1.5zm10 0c-.82 0-1.5-.68-1.5-1.5s.68-1.5 1.5-1.5 1.5.68 1.5 1.5-.68 1.5-1.5 1.5zM12 6l-4 4h3v3h2v-3h3l-4-4z"/>
+            </svg>
+            DOZER-PRO
+        </div>
+        <div class="status-panel">
+            <div class="led-container">
+                <div class="led" id="status-led"></div>
+                <div class="status-text" id="connection-status">LINK OFFLINE</div>
+            </div>
+            <button id="connect-btn">CONNECT BLE</button>
+        </div>
+    </div>
+
+    <div class="console">
+        <div class="panel-section left-panel">
+            <div class="screw tl"></div><div class="screw tr"></div>
+            <div class="screw bl"></div><div class="screw br"></div>
+
+            <div class="throttle-group">
+                <div class="panel-label">Power Output</div>
+                <div class="slider-wrapper">
+                    <input type="range" id="speedSlider" min="0" max="255" value="200">
                 </div>
-                <input type="range" id="pwm-speed" min="0" max="255" value="200" class="w-full accent-emerald-500">
-                <p class="text-xs text-emerald-600 mt-1 font-bold">はやさを変えると曲がりやすさも変わるよ！</p>
+                <div id="speedValueDisplay">200</div>
+            </div>
+
+            <div class="macro-group">
+                <div class="panel-label" style="text-align:center; margin-bottom:0;">Auto Seq</div>
+                <button id="timed-forward"  class="macro-btn">FWD 5s</button>
+                <button id="timed-backward" class="macro-btn">REV 5s</button>
             </div>
         </div>
 
-        <!-- ブロックパレット -->
-        <div class="p-3 bg-gray-100 border-b-4 border-gray-200 z-10" id="palette-area">
-            <div class="flex items-center justify-between bg-white rounded-xl p-2 mb-3 shadow-sm border border-gray-200">
-                <div class="text-xs font-bold text-gray-500 leading-tight">ついかするときの<br>うごくじかん</div>
-                <div class="flex items-center gap-3">
-                    <button onclick="changeDefaultTime(-0.1)" class="w-8 h-8 flex justify-center items-center bg-gray-200 text-gray-600 rounded-full font-bold active:bg-gray-300 active:scale-90"><i data-lucide="minus" class="w-4 h-4"></i></button>
-                    <div class="text-center w-12 font-extrabold text-emerald-600 text-lg"><span id="time-display">1.0</span><span class="text-xs text-gray-500">s</span></div>
-                    <button onclick="changeDefaultTime(0.1)" class="w-8 h-8 flex justify-center items-center bg-emerald-100 text-emerald-700 rounded-full font-bold active:bg-emerald-200 active:scale-90"><i data-lucide="plus" class="w-4 h-4"></i></button>
+        <div class="panel-section right-panel">
+            <div class="screw tl"></div><div class="screw tr"></div>
+            <div class="screw bl"></div><div class="screw br"></div>
+
+            <div class="d-pad-container">
+                <div class="panel-label">Drive Control</div>
+                <div class="d-pad">
+                    <!-- ★ id="stop" から control-button クラスを外しました -->
+                    <button id="up"    class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M12 4l-8 8h6v8h4v-8h6z"/></svg></button>
+                    <button id="left"  class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M4 12l8 8v-6h8v-4h-8V4z"/></svg></button>
+                    <button id="stop"  class="dir-btn"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+                    <button id="right" class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M20 12l-8-8v6H4v4h8v6z"/></svg></button>
+                    <button id="down"  class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M12 20l8-8h-6V4h-4v8H4z"/></svg></button>
                 </div>
             </div>
-
-            <div class="grid grid-cols-3 gap-2" id="palette">
-                <!-- JSで生成 -->
-            </div>
-        </div>
-
-        <!-- プログラムリスト -->
-        <div class="flex-1 overflow-y-auto p-4 bg-slate-50 relative" id="program-container">
-            <div id="empty-message" class="absolute inset-0 flex flex-col items-center justify-center text-gray-300 pointer-events-none">
-                <i data-lucide="list-plus" class="w-16 h-16 mb-2 opacity-50"></i>
-                <p class="font-bold">ブロックをならべてね</p>
-            </div>
-            <div id="program-list" class="flex flex-col gap-2 pb-4"></div>
-        </div>
-
-        <!-- コントロールボタン -->
-        <div class="p-3 bg-white border-t-4 border-gray-200 flex flex-col gap-2 z-20 pb-6 sm:pb-4">
-            <div class="flex gap-2 h-14">
-                <button onclick="clearProgram()" id="btn-clear" class="flex-[1] bg-gray-200 text-gray-600 font-bold rounded-xl flex items-center justify-center gap-1 active:bg-gray-300 active:translate-y-1 transition-all border-b-4 border-gray-300">
-                    <i data-lucide="trash-2" class="w-5 h-5"></i> ぜんぶけす
-                </button>
-                <button onclick="emergencyStop()" class="flex-[1.5] bg-red-500 text-white font-extrabold rounded-xl flex items-center justify-center gap-1 active:bg-red-600 active:translate-y-1 transition-all border-b-4 border-red-700">
-                    <i data-lucide="octagon-alert" class="w-6 h-6"></i> とまれ！
-                </button>
-            </div>
-            <button onclick="executeProgram()" id="btn-execute" class="w-full h-16 bg-emerald-500 text-white font-extrabold rounded-xl flex items-center justify-center gap-2 active:bg-emerald-600 active:translate-y-1 transition-all border-b-4 border-emerald-700 relative overflow-hidden">
-                <div id="execute-content" class="flex items-center gap-2">
-                    <i data-lucide="play" class="w-8 h-8 fill-white"></i>
-                    <span class="text-xl tracking-wider">じっこう！</span>
-                </div>
-                <div id="execute-loader" class="hidden flex items-center gap-2">
-                    <i data-lucide="loader-2" class="animate-spin w-8 h-8"></i>
-                    <span class="text-xl tracking-wider">うごき中...</span>
-                </div>
-            </button>
-        </div>
-
-        <!-- トースト通知 -->
-        <div id="toast" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/80 text-white px-6 py-4 rounded-3xl text-xl font-bold transition-opacity duration-300 opacity-0 pointer-events-none z-50 whitespace-nowrap shadow-xl">
-            メッセージ
         </div>
     </div>
 
     <script>
-        // ==========================================
-        // UI・プログラム管理
-        // ==========================================
-        const blockTypes = [
-            { id: 'F', label: 'すすむ', icon: 'arrow-big-up', bg: 'bg-sky-400', border: 'border-sky-500' },
-            { id: 'B', label: 'さがる', icon: 'arrow-big-down', bg: 'bg-pink-400', border: 'border-pink-500' },
-            { id: 'R', label: 'みぎまわり', icon: 'redo', bg: 'bg-orange-400', border: 'border-orange-500' },
-            { id: 'L', label: 'ひだりまわり', icon: 'undo', bg: 'bg-purple-400', border: 'border-purple-500' },
-            { id: 'W', label: 'まつ', icon: 'hourglass', bg: 'bg-slate-400', border: 'border-slate-500' },
-            { id: 'S', label: 'とまる', icon: 'octagon', bg: 'bg-red-500', border: 'border-red-600' }
-        ];
+    // =========================================================================
+    // BLE接続管理
+    // =========================================================================
+    const SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    const RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 
-        let program = [];
-        let isExecuting = false;
-        let abortExecution = false;
-        let defaultSetTime = 1.0; 
+    const statusLed    = document.getElementById('status-led');
+    const statusText   = document.getElementById('connection-status');
+    const connectBtn   = document.getElementById('connect-btn');
 
-        document.addEventListener('DOMContentLoaded', () => {
-            const palette = document.getElementById('palette');
-            blockTypes.forEach(block => {
-                const btn = document.createElement('button');
-                btn.className = `${block.bg} text-white p-2 rounded-xl flex flex-col items-center justify-center font-bold border-b-4 ${block.border} active:border-b-0 active:translate-y-1 transition-all shadow-sm`;
-                btn.innerHTML = `
-                    <i data-lucide="${block.icon}" class="w-6 h-6 mb-1 ${block.id !== 'W' && block.id !== 'S' ? 'fill-white' : ''}"></i>
-                    <span class="text-xs">${block.label}</span>
-                `;
-                btn.onclick = () => addBlock(block.id);
-                palette.appendChild(btn);
-            });
+    let bluetoothDevice   = null;
+    let rxCharacteristic  = null;
+    let isConnected       = false;
+    let isReconnecting    = false;
+    let reconnectTimer    = null;
+    const MAX_RECONNECT_ATTEMPTS = 5;
+    let reconnectAttempts = 0;
 
-            const pwmSpeed = document.getElementById('pwm-speed');
-            const pwmDisplay = document.getElementById('pwm-display');
-            pwmSpeed.addEventListener('input', (e) => {
-                pwmDisplay.textContent = e.target.value;
-            });
+    function setUIState(state) {
+        statusLed.className = 'led';
+        connectBtn.className = '';
+        connectBtn.disabled = false;
 
-            lucide.createIcons();
-            updateUI();
-        });
-
-        function changeDefaultTime(delta) {
-            defaultSetTime += delta;
-            if (defaultSetTime < 0.1) defaultSetTime = 0.1;
-            if (defaultSetTime > 10.0) defaultSetTime = 10.0;
-            document.getElementById('time-display').textContent = defaultSetTime.toFixed(1);
+        if (state === 'connected') {
+            statusLed.classList.add('connected');
+            statusText.textContent = 'LINK ONLINE';
+            statusText.style.color = 'var(--success-green)';
+            connectBtn.classList.add('connected');
+            connectBtn.textContent = 'LINK ACTIVE';
+            connectBtn.disabled = true;
+        } else if (state === 'reconnecting') {
+            statusLed.classList.add('reconnecting');
+            statusText.textContent = 'RECONNECTING…';
+            statusText.style.color = 'var(--warning-orange)';
+            connectBtn.classList.add('reconnecting');
+            connectBtn.textContent = 'RECONNECT';
+            connectBtn.disabled = true;
+        } else {
+            statusText.textContent = 'LINK OFFLINE';
+            statusText.style.color = '#ccc';
+            connectBtn.textContent = 'CONNECT BLE';
         }
+    }
 
-        function addBlock(blockId) {
-            if (isExecuting) return;
-            if (program.length >= 30) {
-                showToast("ブロックはいっぱいです！", "bg-orange-500");
-                return;
-            }
-            const blockDef = blockTypes.find(b => b.id === blockId);
-            const msTime = Math.round(defaultSetTime * 1000);
-            
-            program.push({ 
-                ...blockDef, 
-                uniqueId: Date.now(),
-                timeMs: msTime,
-                timeLabel: defaultSetTime.toFixed(1)
-            });
-            updateUI();
-            setTimeout(() => {
-                const container = document.getElementById('program-container');
-                container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-            }, 50);
-        }
-
-        function changeBlockTime(index, delta) {
-            if (isExecuting) return;
-            let currentTimeSec = parseFloat(program[index].timeLabel);
-            currentTimeSec += delta;
-            if (currentTimeSec < 0.1) currentTimeSec = 0.1;
-            if (currentTimeSec > 10.0) currentTimeSec = 10.0;
-            program[index].timeLabel = currentTimeSec.toFixed(1);
-            program[index].timeMs = Math.round(currentTimeSec * 1000);
-            updateUI();
-        }
-
-        function removeBlock(index) {
-            if (isExecuting) return;
-            program.splice(index, 1);
-            updateUI();
-        }
-
-        function clearProgram() {
-            if (isExecuting || program.length === 0) return;
-            program = [];
-            updateUI();
-        }
-
-        function updateUI() {
-            const listEl = document.getElementById('program-list');
-            const emptyMsg = document.getElementById('empty-message');
-            
-            emptyMsg.style.display = program.length === 0 ? 'flex' : 'none';
-            listEl.innerHTML = '';
-            
-            program.forEach((block, index) => {
-                const item = document.createElement('div');
-                item.id = `block-${index}`;
-                item.className = `${block.bg} text-white p-2 rounded-xl flex items-center justify-between border-2 border-transparent transition-all shadow-sm`;
-                item.innerHTML = `
-                    <div class="flex items-center gap-2 font-bold flex-1">
-                        <div class="bg-white/20 w-6 h-6 rounded-lg text-xs flex items-center justify-center shrink-0">${index + 1}</div>
-                        <i data-lucide="${block.icon}" class="w-6 h-6 shrink-0 ${block.id !== 'W' && block.id !== 'S' ? 'fill-white' : ''}"></i>
-                        <span class="text-sm truncate w-16 sm:w-auto">${block.label}</span>
-                    </div>
-                    <div class="flex items-center gap-1 sm:gap-2 mr-1">
-                        <button onclick="changeBlockTime(${index}, -0.1)" class="w-8 h-8 flex items-center justify-center bg-black/10 rounded-lg active:bg-black/30 transition-colors ${isExecuting ? 'pointer-events-none opacity-50' : ''}"><i data-lucide="minus" class="w-4 h-4"></i></button>
-                        <span class="text-sm font-extrabold w-10 text-center">${block.timeLabel}s</span>
-                        <button onclick="changeBlockTime(${index}, 0.1)" class="w-8 h-8 flex items-center justify-center bg-black/10 rounded-lg active:bg-black/30 transition-colors ${isExecuting ? 'pointer-events-none opacity-50' : ''}"><i data-lucide="plus" class="w-4 h-4"></i></button>
-                    </div>
-                    <button onclick="removeBlock(${index})" class="bg-white/20 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/40 active:scale-90 transition-transform shrink-0 ${isExecuting ? 'hidden' : ''}"><i data-lucide="x" class="w-5 h-5"></i></button>
-                `;
-                listEl.appendChild(item);
-            });
-            lucide.createIcons();
-        }
-
-        async function executeProgram() {
-            if (isExecuting || program.length === 0) return;
-            if (!bleDevice || !bleDevice.gatt.connected) {
-                showToast("Bluetoothをつないでね！", "bg-red-500");
-                return;
-            }
-            
-            isExecuting = true;
-            abortExecution = false;
-            setExecutionMode(true);
-            showToast("プログラムをそうしん中...", "bg-blue-500");
-
-            // 1. ESP32側のプログラムメモリをクリア
-            await sendCommandToESP32("CLR:0");
-            await sleepWithAbort(200); // ★ウェイトを長くしてESP32の準備を待つ
-
-            // 2. すべてのブロックの命令を一気に送信
-            const speed = document.getElementById('pwm-speed').value;
-            for (let i = 0; i < program.length; i++) {
-                if (abortExecution) break; 
-                const block = program[i];
-                // "ADD:F:200:1000" のような形で送る
-                await sendCommandToESP32(`ADD:${block.id}:${speed}:${block.timeMs}`);
-                await sleepWithAbort(150); // ★連続送信の詰まりを防ぐために間隔を広げる
+    async function connectBLE() {
+        try {
+            if (!bluetoothDevice) {
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ESP32-Bulldozer' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
             }
 
-            if (abortExecution) {
-                setExecutionMode(false);
-                isExecuting = false;
-                return;
-            }
+            const server  = await bluetoothDevice.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_UUID);
+            rxCharacteristic = await service.getCharacteristic(RX_CHAR_UUID);
 
-            // 3. 実行スタートの合図を送る
-            await sendCommandToESP32("RUN:0");
-            showToast("ロボットが動きます！", "bg-emerald-500");
+            isConnected       = true;
+            isReconnecting    = false;
+            reconnectAttempts = 0;
+            clearTimeout(reconnectTimer);
+            setUIState('connected');
+            console.log('[BLE] Connected');
+        } catch (err) {
+            console.error('[BLE] Connect error:', err);
+            isConnected = false;
+            rxCharacteristic = null;
 
-            // 4. UI側のアニメーション（完了判定はESP32からの通信に任せる）
-            runUIAnimation();
-        }
-
-        async function runUIAnimation() {
-            for (let i = 0; i < program.length; i++) {
-                if (abortExecution || !isExecuting) break; 
-                highlightBlock(i);
-                
-                const blockEl = document.getElementById(`block-${i}`);
-                if(blockEl) blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-                await sleepWithAbort(program[i].timeMs);
-            }
-            // 最後までハイライトが行っても、ESP32からの"FINISH"が来るまでは実行中状態を維持する
-            removeHighlight();
-        }
-
-        async function emergencyStop() {
-            abortExecution = true;
-            await sendCommandToESP32('S:0'); // 緊急停止
-            removeHighlight();
-            setExecutionMode(false);
-            isExecuting = false;
-            showToast("とまりました！", "bg-red-600");
-        }
-
-        function sleepWithAbort(ms) {
-            return new Promise(resolve => {
-                const interval = 50;
-                let elapsed = 0;
-                const timer = setInterval(() => {
-                    elapsed += interval;
-                    if (abortExecution || elapsed >= ms) {
-                        clearInterval(timer);
-                        resolve();
-                    }
-                }, interval);
-            });
-        }
-
-        function highlightBlock(index) {
-            removeHighlight();
-            const blockEl = document.getElementById(`block-${index}`);
-            if (blockEl) blockEl.classList.add('executing-block');
-        }
-
-        function removeHighlight() {
-            document.querySelectorAll('.executing-block').forEach(el => el.classList.remove('executing-block'));
-        }
-
-        function setExecutionMode(executing) {
-            const paletteArea = document.getElementById('palette-area');
-            const btnClear = document.getElementById('btn-clear');
-            const btnExecute = document.getElementById('btn-execute');
-            
-            if (executing) {
-                paletteArea.classList.add('opacity-50', 'pointer-events-none');
-                btnClear.classList.add('opacity-50', 'pointer-events-none');
-                btnExecute.classList.add('pointer-events-none');
-                btnExecute.classList.replace('bg-emerald-500', 'bg-yellow-500');
-                btnExecute.classList.replace('border-emerald-700', 'border-yellow-600');
-                document.getElementById('execute-content').classList.add('hidden');
-                document.getElementById('execute-loader').classList.remove('hidden');
+            if (isReconnecting && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                scheduleReconnect();
             } else {
-                paletteArea.classList.remove('opacity-50', 'pointer-events-none');
-                btnClear.classList.remove('opacity-50', 'pointer-events-none');
-                btnExecute.classList.remove('pointer-events-none');
-                btnExecute.classList.replace('bg-yellow-500', 'bg-emerald-500');
-                btnExecute.classList.replace('border-yellow-600', 'border-emerald-700');
-                document.getElementById('execute-content').classList.remove('hidden');
-                document.getElementById('execute-loader').classList.add('hidden');
+                isReconnecting = false;
+                setUIState('offline');
             }
-            updateUI();
+        }
+    }
+
+    function onDisconnected() {
+        isConnected      = false;
+        rxCharacteristic = null;
+        console.log('[BLE] Disconnected');
+
+        stopMove();
+
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            isReconnecting = true;
+            setUIState('reconnecting');
+            scheduleReconnect();
+        } else {
+            setUIState('offline');
+        }
+    }
+
+    function scheduleReconnect() {
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000);
+        console.log(`[BLE] Reconnect attempt ${reconnectAttempts} in ${delay}ms`);
+        reconnectTimer = setTimeout(connectBLE, delay);
+    }
+
+    connectBtn.addEventListener('click', () => {
+        if (isConnected || isReconnecting) return;
+        reconnectAttempts = 0;
+        bluetoothDevice   = null;  
+        setUIState('reconnecting');
+        connectBLE();
+    });
+
+    // =========================================================================
+    // コマンド送信キュー 
+    // =========================================================================
+    let isSending     = false;
+    let pendingCmd    = null;  
+
+    async function sendCommand(direction, speed) {
+        if (!isConnected || !rxCharacteristic) return;
+
+        pendingCmd = { direction, speed };
+
+        if (isSending) return; 
+        isSending = true;
+
+        while (pendingCmd) {
+            const cmd = pendingCmd;
+            pendingCmd = null;
+
+            try {
+                const data = new TextEncoder().encode(`${cmd.direction}:${cmd.speed}`);
+                await rxCharacteristic.writeValueWithoutResponse(data);
+            } catch (err) {
+                console.error('[BLE] Send error:', err);
+                isSending = false;
+                return;
+            }
+
+            if (pendingCmd) await sleep(20);
         }
 
-        function toggleSettings() {
-            if(isExecuting) return;
-            document.getElementById('settings-area').classList.toggle('hidden');
-        }
+        isSending = false;
+    }
 
-        function showToast(message, bgColorClass = "bg-black/80") {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.className = `absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white px-6 py-4 rounded-3xl text-xl font-bold transition-opacity duration-300 opacity-0 pointer-events-none z-50 whitespace-nowrap shadow-xl ${bgColorClass}`;
-            requestAnimationFrame(() => toast.classList.remove('opacity-0'));
-            setTimeout(() => toast.classList.add('opacity-0'), 2000);
-        }
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
 
-        // ==========================================
-        // Web Bluetooth API (通信処理)
-        // ==========================================
-        const SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
-        const CMD_CHAR_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
-        const TX_CHAR_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
+    // =========================================================================
+    // ハートビート (ping)
+    // =========================================================================
+    setInterval(async () => {
+        if (!isConnected || !rxCharacteristic || isSending) return;
+        try {
+            const data = new TextEncoder().encode('ping');
+            await rxCharacteristic.writeValueWithoutResponse(data);
+        } catch (err) {
+            console.warn('[BLE] Ping failed');
+        }
+    }, 2000);
+
+    // =========================================================================
+    // 操作UI
+    // =========================================================================
+    const buttons     = document.querySelectorAll('.control-button'); // stopを含まない
+    const stopBtn     = document.getElementById('stop'); // ★ 緊急停止ボタンを単独で取得
+    const timedFwdBtn = document.getElementById('timed-forward');
+    const timedRevBtn = document.getElementById('timed-backward');
+    const speedSlider = document.getElementById('speedSlider');
+    const speedDisplay= document.getElementById('speedValueDisplay');
+
+    let currentDirection = 'stop';
+    let currentSpeed     = parseInt(speedSlider.value);
+    let timedMoveTimeout = null; // ★ 自動走行のタイマーを管理
+
+    function startMove(direction) {
+        if (currentDirection === direction) return;
+        currentDirection = direction;
+        buttons.forEach(b => b.classList.remove('active'));
+        document.getElementById(direction)?.classList.add('active');
+        sendCommand(currentDirection, currentSpeed);
+    }
+
+    function stopMove() {
+        if (currentDirection === 'stop') return;
+        currentDirection = 'stop';
+        buttons.forEach(b => b.classList.remove('active'));
         
-        let bleDevice = null;
-        let cmdCharacteristic = null;
-        let txCharacteristic = null;
-        let reconnectTimer = null;
-
-        async function toggleBluetooth() {
-            if (bleDevice && bleDevice.gatt.connected) {
-                bleDevice.gatt.disconnect();
-            } else {
-                try {
-                    bleDevice = await navigator.bluetooth.requestDevice({
-                        filters: [{ name: 'ESP32-Bulldozer' }],
-                        optionalServices: [SERVICE_UUID]
-                    });
-                    
-                    bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
-                    
-                    showToast("つないでいます...", "bg-blue-500");
-                    const server = await bleDevice.gatt.connect();
-                    const service = await server.getPrimaryService(SERVICE_UUID);
-                    cmdCharacteristic = await service.getCharacteristic(CMD_CHAR_UUID);
-                    
-                    // ESP32からの通知（完了合図）を受け取る設定
-                    txCharacteristic = await service.getCharacteristic(TX_CHAR_UUID);
-                    await txCharacteristic.startNotifications();
-                    txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
-                    
-                    updateBleUI(true);
-                    if (reconnectTimer) clearTimeout(reconnectTimer);
-                    showToast("つながりました！", "bg-blue-600");
-                } catch (error) {
-                    console.error(error);
-                    if (error.name !== 'NotFoundError') { // キャンセル以外
-                        showToast("せつぞくしっぱい", "bg-red-500");
-                    }
-                }
-            }
+        // ★ 自動走行タイマーが動いていたらキャンセルしてUIを元に戻す
+        if (timedMoveTimeout) {
+            clearTimeout(timedMoveTimeout);
+            timedMoveTimeout = null;
+            timedFwdBtn.disabled = false;
+            timedRevBtn.disabled = false;
         }
+        
+        sendCommand('stop', 0); // 確実に速度0で送信
+    }
 
-        function onDisconnected() {
-            cmdCharacteristic = null;
-            txCharacteristic = null;
-            updateBleUI(false);
-            showToast("きれました。さいせつぞく中...", "bg-orange-500");
-            
-            if (isExecuting) emergencyStop(); // 切断時は実行状態を解除
+    // 通常の方向キー（押したら進む、離したら止まる）
+    buttons.forEach(btn => {
+        const dir = btn.id;
+        btn.addEventListener('mousedown',   e => { e.preventDefault(); startMove(dir); });
+        btn.addEventListener('touchstart',  e => { e.preventDefault(); startMove(dir); }, { passive: false });
+        btn.addEventListener('mouseup',     e => { e.preventDefault(); stopMove(); });
+        btn.addEventListener('mouseleave',  e => { e.preventDefault(); stopMove(); });
+        btn.addEventListener('touchend',    e => { e.preventDefault(); stopMove(); });
+        btn.addEventListener('touchcancel', e => { e.preventDefault(); stopMove(); });
+    });
 
-            // 自動再接続を開始
-            if (reconnectTimer) clearTimeout(reconnectTimer);
-            reconnectTimer = setTimeout(attemptReconnect, 2000);
+    // ★ 緊急停止ボタン（押した瞬間だけ反応し、強制停止する）
+    function triggerEmergencyStop(e) {
+        if (e) e.preventDefault();
+        stopMove();
+        // 押したフィードバックのアニメーションを一瞬だけ見せる
+        stopBtn.classList.add('active');
+        setTimeout(() => stopBtn.classList.remove('active'), 200);
+    }
+    stopBtn.addEventListener('mousedown', triggerEmergencyStop);
+    stopBtn.addEventListener('touchstart', triggerEmergencyStop, { passive: false });
+
+    // 自動走行
+    function handleTimedMove(direction, duration) {
+        if (timedMoveTimeout) clearTimeout(timedMoveTimeout);
+        sendCommand(direction, currentSpeed);
+        currentDirection = direction;
+        timedFwdBtn.disabled = true;
+        timedRevBtn.disabled = true;
+        
+        timedMoveTimeout = setTimeout(() => {
+            timedFwdBtn.disabled = false;
+            timedRevBtn.disabled = false;
+            timedMoveTimeout = null;
+            stopMove();
+        }, duration);
+    }
+    timedFwdBtn.addEventListener('click', () => handleTimedMove('timed-forward',  5000));
+    timedRevBtn.addEventListener('click', () => handleTimedMove('timed-backward', 5000));
+
+    speedSlider.addEventListener('input', () => {
+        currentSpeed = parseInt(speedSlider.value);
+        speedDisplay.textContent = String(currentSpeed).padStart(3, '0');
+    });
+    speedSlider.addEventListener('change', () => {
+        if (currentDirection !== 'stop') {
+            sendCommand(currentDirection, currentSpeed);
         }
+    });
 
-        async function attemptReconnect() {
-            if (!bleDevice) return;
-            try {
-                console.log("再接続を試みます...");
-                const server = await bleDevice.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                cmdCharacteristic = await service.getCharacteristic(CMD_CHAR_UUID);
-                
-                txCharacteristic = await service.getCharacteristic(TX_CHAR_UUID);
-                await txCharacteristic.startNotifications();
-                txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+    // =========================================================================
+    // キーボード操作
+    // =========================================================================
+    const keyMap = {
+        'ArrowUp':'up',   'w':'up',   'W':'up',
+        'ArrowDown':'down','s':'down','S':'down',
+        'ArrowLeft':'left','a':'left','A':'left',
+        'ArrowRight':'right','d':'right','D':'right'
+    };
+    let activeKey = null;
 
-                updateBleUI(true);
-                showToast("さいせつぞくしました！", "bg-blue-600");
-            } catch (error) {
-                console.warn("再接続失敗、リトライします...", error);
-                reconnectTimer = setTimeout(attemptReconnect, 3000);
-            }
+    document.addEventListener('keydown', e => {
+        if (e.key === ' ') { // スペースキーを緊急停止に割り当て
+            e.preventDefault();
+            triggerEmergencyStop();
+            return;
         }
-
-        function updateBleUI(connected) {
-            const btn = document.getElementById('btn-connect');
-            const text = document.getElementById('ble-text');
-            const icon = document.getElementById('ble-icon');
-            
-            if (connected) {
-                btn.className = "flex items-center gap-1 bg-blue-500 text-white px-3 py-1.5 rounded-full text-sm font-bold transition-colors active:scale-90 shadow-md";
-                text.textContent = "つながってる";
-            } else {
-                btn.className = "flex items-center gap-1 bg-gray-400 text-white px-3 py-1.5 rounded-full text-sm font-bold transition-colors active:scale-90 shadow-sm";
-                text.textContent = "つなぐ";
-            }
-        }
-
-        // ESP32からの通知を受け取った時の処理
-        function handleNotifications(event) {
-            const value = new TextDecoder().decode(event.target.value);
-            console.log("ESP32からの通信:", value);
-            
-            if (value === "FINISH" && isExecuting) {
-                isExecuting = false;
-                removeHighlight();
-                setExecutionMode(false);
-                showToast("おわりました！", "bg-emerald-500");
-            }
-        }
-
-        // ESP32へのコマンド送信 ("S:0" や "ADD:F:200:1000" など)
-        async function sendCommandToESP32(commandString) {
-            if (!cmdCharacteristic) return;
-            
-            try {
-                const encoder = new TextEncoder();
-                await cmdCharacteristic.writeValue(encoder.encode(commandString));
-            } catch (error) {
-                console.warn("送信エラー:", error, "コマンド:", commandString);
-                // ★通信が少し混み合っただけで強制切断されないように、切断処理を削除
-            }
-        }
-
-        // 1秒ごとにPingを送り、ESP32側のフェイルセーフ(3秒)を回避する
-        setInterval(() => {
-            if (bleDevice && bleDevice.gatt.connected && !isExecuting) {
-                sendCommandToESP32('ping');
-            }
-        }, 1000);
-
+        
+        if (activeKey === e.key) return;
+        const dir = keyMap[e.key];
+        if (dir) { e.preventDefault(); activeKey = e.key; startMove(dir); }
+    });
+    document.addEventListener('keyup', e => {
+        const dir = keyMap[e.key];
+        if (dir && activeKey === e.key) { e.preventDefault(); activeKey = null; stopMove(); }
+    });
     </script>
 </body>
 </html>
