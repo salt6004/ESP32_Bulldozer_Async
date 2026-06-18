@@ -172,48 +172,54 @@
         .macro-btn:active { transform: translateY(4px); box-shadow: 0 0px 2px rgba(0,0,0,0.8); color: #fff; }
         .macro-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        /* Dパッド */
-        .d-pad-container { z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; }
-        .d-pad {
-            display: grid;
-            grid-template-columns: repeat(3, 80px);
-            grid-template-rows: repeat(3, 80px);
-            gap: 8px;
+        /* ジョイスティック & E-STOP */
+        .joystick-container { z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .joystick-base {
+            width: 160px; height: 160px; background: radial-gradient(circle, #222, #111);
+            border-radius: 50%; border: 4px solid #333;
+            box-shadow: inset 0 5px 15px rgba(0,0,0,0.8), 0 5px 10px rgba(0,0,0,0.5);
+            position: relative; touch-action: none;
         }
-        .dir-btn {
-            background: linear-gradient(135deg, #4a4a4a, #2a2a2a); border: 2px solid #111; border-radius: 12px;
-            box-shadow: inset 0 2px 0 rgba(255,255,255,0.1), inset 0 -2px 0 rgba(0,0,0,0.4), 0 6px 10px rgba(0,0,0,0.6);
-            color: #ccc; display: flex; justify-content: center; align-items: center;
-            cursor: pointer; transition: all 0.05s; padding: 0; outline: none;
+        .joystick-knob {
+            width: 60px; height: 60px; background: radial-gradient(circle, #666, #333);
+            border-radius: 50%; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: inset 0 2px 5px rgba(255,255,255,0.2), 0 5px 10px rgba(0,0,0,0.8);
+            border: 2px solid #000; pointer-events: none; transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
-        .dir-btn svg { width: 40px; height: 40px; fill: currentColor; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5)); }
-        .dir-btn:active, .dir-btn.active {
-            background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
-            box-shadow: inset 0 4px 8px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5);
-            transform: translateY(4px); color: var(--primary-yellow);
-        }
-        .dir-btn#up    { grid-area: 1 / 2 / 2 / 3; border-top-left-radius: 20px; border-top-right-radius: 20px; }
-        .dir-btn#left  { grid-area: 2 / 1 / 3 / 2; border-top-left-radius: 20px; border-bottom-left-radius: 20px; }
-        .dir-btn#right { grid-area: 2 / 3 / 3 / 4; border-top-right-radius: 20px; border-bottom-right-radius: 20px; }
-        .dir-btn#down  { grid-area: 3 / 2 / 4 / 3; border-bottom-left-radius: 20px; border-bottom-right-radius: 20px; }
-        .dir-btn#stop  {
-            grid-area: 2 / 2 / 3 / 3; background: radial-gradient(circle, #E53935, #b71c1c);
-            border-radius: 50%; border: 4px solid #111; color: #fff;
+        .joystick-knob.dragging { transition: none; }
+        
+        .estop-btn {
+            background: radial-gradient(circle, #E53935, #b71c1c); border-radius: 8px; border: 2px solid #111;
+            color: #fff; padding: 12px 30px; font-weight: 900; letter-spacing: 2px; font-size: 1rem;
             box-shadow: inset 0 4px 4px rgba(255,255,255,0.2), 0 6px 10px rgba(0,0,0,0.6);
+            cursor: pointer; transition: all 0.1s; text-transform: uppercase;
         }
-        .dir-btn#stop svg { width: 28px; height: 28px; }
-        .dir-btn#stop:active, .dir-btn#stop.active {
-            background: radial-gradient(circle, #c62828, #7f0000); color: #ccc;
-            box-shadow: inset 0 6px 12px rgba(0,0,0,0.8), 0 1px 2px rgba(0,0,0,0.5);
+        .estop-btn:active, .estop-btn.active { 
+            transform: translateY(4px); box-shadow: inset 0 2px 4px rgba(0,0,0,0.8); 
+            background: radial-gradient(circle, #c62828, #7f0000); color: #ccc; 
+        }
+
+        /* 数値入力フィールド */
+        #speedInput {
+            margin-top: 10px; font-family: 'Courier New', Courier, monospace;
+            font-size: 1.5rem; font-weight: bold; color: var(--primary-yellow);
+            background: #0a0a0a; padding: 4px 0; border-radius: 4px;
+            border: 1px solid #222; box-shadow: inset 0 0 5px rgba(255, 179, 0, 0.2);
+            width: 70px; text-align: center; outline: none; -moz-appearance: textfield;
+        }
+        #speedInput::-webkit-inner-spin-button, #speedInput::-webkit-outer-spin-button { 
+            -webkit-appearance: none; margin: 0; 
         }
 
         @media (max-width: 500px), (max-height: 500px) {
-            .d-pad { grid-template-columns: repeat(3, 70px); grid-template-rows: repeat(3, 70px); }
-            .dir-btn svg { width: 32px; height: 32px; }
             .slider-wrapper { height: 120px; }
             input[type=range] { width: 100px; }
             .macro-btn { padding: 10px; font-size: 0.75rem; width: 90px; }
-            #speedValueDisplay { font-size: 1.2rem; }
+            #speedInput { font-size: 1.2rem; width: 60px; }
+            .joystick-base { width: 130px; height: 130px; }
+            .joystick-knob { width: 50px; height: 50px; }
+            .estop-btn { padding: 10px 20px; font-size: 0.9rem; }
         }
     </style>
 </head>
@@ -245,7 +251,7 @@
                 <div class="slider-wrapper">
                     <input type="range" id="speedSlider" min="0" max="255" value="200">
                 </div>
-                <div id="speedValueDisplay">200</div>
+                <input type="number" id="speedInput" min="0" max="255" value="200">
             </div>
 
             <div class="macro-group">
@@ -259,16 +265,12 @@
             <div class="screw tl"></div><div class="screw tr"></div>
             <div class="screw bl"></div><div class="screw br"></div>
 
-            <div class="d-pad-container">
+            <div class="joystick-container">
                 <div class="panel-label">Drive Control</div>
-                <div class="d-pad">
-                    <!-- ★ id="stop" から control-button クラスを外しました -->
-                    <button id="up"    class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M12 4l-8 8h6v8h4v-8h6z"/></svg></button>
-                    <button id="left"  class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M4 12l8 8v-6h8v-4h-8V4z"/></svg></button>
-                    <button id="stop"  class="dir-btn"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
-                    <button id="right" class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M20 12l-8-8v6H4v4h8v6z"/></svg></button>
-                    <button id="down"  class="dir-btn control-button"><svg viewBox="0 0 24 24"><path d="M12 20l8-8h-6V4h-4v8H4z"/></svg></button>
+                <div class="joystick-base" id="joystickBase">
+                    <div class="joystick-knob" id="joystickKnob"></div>
                 </div>
+                <button id="estopBtn" class="estop-btn">E-STOP</button>
             </div>
         </div>
     </div>
@@ -436,31 +438,42 @@
     // =========================================================================
     // 操作UI
     // =========================================================================
-    const buttons     = document.querySelectorAll('.control-button'); // stopを含まない
-    const stopBtn     = document.getElementById('stop'); // ★ 緊急停止ボタンを単独で取得
-    const timedFwdBtn = document.getElementById('timed-forward');
-    const timedRevBtn = document.getElementById('timed-backward');
-    const speedSlider = document.getElementById('speedSlider');
-    const speedDisplay= document.getElementById('speedValueDisplay');
+    const joystickBase = document.getElementById('joystickBase');
+    const joystickKnob = document.getElementById('joystickKnob');
+    const estopBtn     = document.getElementById('estopBtn');
+    const timedFwdBtn  = document.getElementById('timed-forward');
+    const timedRevBtn  = document.getElementById('timed-backward');
+    const speedSlider  = document.getElementById('speedSlider');
+    const speedInput   = document.getElementById('speedInput');
 
     let currentDirection = 'stop';
     let currentSpeed     = parseInt(speedSlider.value);
-    let timedMoveTimeout = null; // ★ 自動走行のタイマーを管理
+    let timedMoveTimeout = null; 
+
+    // ★ ジョイスティックの視覚的リセット用ヘルパー
+    function updateKnobVisual(dir) {
+        if (isDragging) return; // 手動ドラッグ中は視覚更新しない
+        const maxR = 40; // キーボード等で押した時のKnobの移動量
+        let kx = 0, ky = 0;
+        if (dir === 'up') ky = -maxR;
+        else if (dir === 'down') ky = maxR;
+        else if (dir === 'left') kx = -maxR;
+        else if (dir === 'right') kx = maxR;
+        joystickKnob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
+    }
 
     function startMove(direction) {
         if (currentDirection === direction) return;
         currentDirection = direction;
-        buttons.forEach(b => b.classList.remove('active'));
-        document.getElementById(direction)?.classList.add('active');
+        updateKnobVisual(direction);
         sendCommand(currentDirection, currentSpeed);
     }
 
     function stopMove() {
         if (currentDirection === 'stop') return;
         currentDirection = 'stop';
-        buttons.forEach(b => b.classList.remove('active'));
+        updateKnobVisual('stop');
         
-        // ★ 自動走行タイマーが動いていたらキャンセルしてUIを元に戻す
         if (timedMoveTimeout) {
             clearTimeout(timedMoveTimeout);
             timedMoveTimeout = null;
@@ -468,30 +481,87 @@
             timedRevBtn.disabled = false;
         }
         
-        sendCommand('stop', 0); // 確実に速度0で送信
+        sendCommand('stop', 0); 
     }
 
-    // 通常の方向キー（押したら進む、離したら止まる）
-    buttons.forEach(btn => {
-        const dir = btn.id;
-        btn.addEventListener('mousedown',   e => { e.preventDefault(); startMove(dir); });
-        btn.addEventListener('touchstart',  e => { e.preventDefault(); startMove(dir); }, { passive: false });
-        btn.addEventListener('mouseup',     e => { e.preventDefault(); stopMove(); });
-        btn.addEventListener('mouseleave',  e => { e.preventDefault(); stopMove(); });
-        btn.addEventListener('touchend',    e => { e.preventDefault(); stopMove(); });
-        btn.addEventListener('touchcancel', e => { e.preventDefault(); stopMove(); });
-    });
+    // ★ ジョイスティックロジック
+    let isDragging = false;
+    const maxRadius = 50; // ドラッグ可能半径
+    const deadzone = 15;  // 反応しない遊び領域
+
+    function handleJoystickMove(e) {
+        if (!isDragging) return;
+        
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+
+        const rect = joystickBase.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const dx = clientX - cx;
+        const dy = clientY - cy;
+
+        const distance = Math.sqrt(dx*dx + dy*dy);
+        const angle = Math.atan2(dy, dx);
+        const r = Math.min(distance, maxRadius);
+        
+        const knobX = r * Math.cos(angle);
+        const knobY = r * Math.sin(angle);
+        joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
+
+        let newDir = 'stop';
+        if (r > deadzone) {
+            const deg = angle * 180 / Math.PI;
+            if (deg > -45 && deg <= 45) newDir = 'right';
+            else if (deg > 45 && deg <= 135) newDir = 'down';
+            else if (deg > 135 || deg <= -135) newDir = 'left';
+            else if (deg > -135 && deg <= -45) newDir = 'up';
+        }
+
+        if (newDir !== currentDirection) {
+            if (newDir === 'stop') {
+                stopMove();
+            } else {
+                startMove(newDir);
+            }
+        }
+    }
+
+    function startJoystick(e) {
+        e.preventDefault();
+        isDragging = true;
+        joystickKnob.classList.add('dragging');
+        handleJoystickMove(e);
+    }
+
+    function stopJoystick() {
+        if (!isDragging) return;
+        isDragging = false;
+        joystickKnob.classList.remove('dragging');
+        stopMove();
+    }
+
+    joystickBase.addEventListener('mousedown', startJoystick);
+    joystickBase.addEventListener('touchstart', startJoystick, { passive: false });
+    window.addEventListener('mousemove', handleJoystickMove);
+    window.addEventListener('touchmove', handleJoystickMove, { passive: false });
+    window.addEventListener('mouseup', stopJoystick);
+    window.addEventListener('touchend', stopJoystick);
+    window.addEventListener('touchcancel', stopJoystick);
 
     // ★ 緊急停止ボタン（押した瞬間だけ反応し、強制停止する）
     function triggerEmergencyStop(e) {
         if (e) e.preventDefault();
         stopMove();
-        // 押したフィードバックのアニメーションを一瞬だけ見せる
-        stopBtn.classList.add('active');
-        setTimeout(() => stopBtn.classList.remove('active'), 200);
+        estopBtn.classList.add('active');
+        setTimeout(() => estopBtn.classList.remove('active'), 200);
     }
-    stopBtn.addEventListener('mousedown', triggerEmergencyStop);
-    stopBtn.addEventListener('touchstart', triggerEmergencyStop, { passive: false });
+    estopBtn.addEventListener('mousedown', triggerEmergencyStop);
+    estopBtn.addEventListener('touchstart', triggerEmergencyStop, { passive: false });
 
     // 自動走行
     function handleTimedMove(direction, duration) {
@@ -511,15 +581,26 @@
     timedFwdBtn.addEventListener('click', () => handleTimedMove('timed-forward',  5000));
     timedRevBtn.addEventListener('click', () => handleTimedMove('timed-backward', 5000));
 
-    speedSlider.addEventListener('input', () => {
-        currentSpeed = parseInt(speedSlider.value);
-        speedDisplay.textContent = String(currentSpeed).padStart(3, '0');
-    });
-    speedSlider.addEventListener('change', () => {
+    // ★ スライダーと数値入力の同期
+    function syncSpeed(val) {
+        let speed = parseInt(val);
+        if (isNaN(speed)) speed = 0;
+        speed = Math.max(0, Math.min(255, speed));
+        currentSpeed = speed;
+        speedSlider.value = currentSpeed;
+        speedInput.value = currentSpeed;
         if (currentDirection !== 'stop') {
             sendCommand(currentDirection, currentSpeed);
         }
+    }
+
+    speedSlider.addEventListener('input', () => {
+        speedInput.value = speedSlider.value;
     });
+    speedSlider.addEventListener('change', () => syncSpeed(speedSlider.value));
+    
+    speedInput.addEventListener('change', () => syncSpeed(speedInput.value));
+    speedInput.addEventListener('blur', () => syncSpeed(speedInput.value));
 
     // =========================================================================
     // キーボード操作
