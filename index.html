@@ -255,7 +255,7 @@
 
             // 1. ESP32側のプログラムメモリをクリア
             await sendCommandToESP32("CLR:0");
-            await sleepWithAbort(100);
+            await sleepWithAbort(200); // ★ウェイトを長くしてESP32の準備を待つ
 
             // 2. すべてのブロックの命令を一気に送信
             const speed = document.getElementById('pwm-speed').value;
@@ -264,7 +264,7 @@
                 const block = program[i];
                 // "ADD:F:200:1000" のような形で送る
                 await sendCommandToESP32(`ADD:${block.id}:${speed}:${block.timeMs}`);
-                await sleepWithAbort(40); // 送信詰まり防止
+                await sleepWithAbort(150); // ★連続送信の詰まりを防ぐために間隔を広げる
             }
 
             if (abortExecution) {
@@ -480,11 +480,8 @@
                 const encoder = new TextEncoder();
                 await cmdCharacteristic.writeValue(encoder.encode(commandString));
             } catch (error) {
-                console.warn("送信エラー:", error);
-                // 送信失敗した場合は切断処理
-                if (bleDevice && bleDevice.gatt.connected) {
-                    bleDevice.gatt.disconnect();
-                }
+                console.warn("送信エラー:", error, "コマンド:", commandString);
+                // ★通信が少し混み合っただけで強制切断されないように、切断処理を削除
             }
         }
 
