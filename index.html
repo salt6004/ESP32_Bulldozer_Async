@@ -6,6 +6,8 @@
     <title>ラジコンプログラミング (Bluetooth)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- ★追加: ドラッグ＆ドロップ用のライブラリ (SortableJS) -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
     
     <style>
@@ -79,9 +81,9 @@
                 <div class="flex items-center justify-between bg-white rounded-xl p-2 mb-3 shadow-sm border border-gray-200">
                     <div class="text-xs font-bold text-gray-500 leading-tight">ついかするときの<br>うごくじかん</div>
                     <div class="flex items-center gap-3">
-                        <button onclick="changeDefaultTime(-0.1)" class="w-8 h-8 flex justify-center items-center bg-gray-200 text-gray-600 rounded-full font-bold active:bg-gray-300 active:scale-90"><i data-lucide="minus" class="w-4 h-4"></i></button>
-                        <div class="text-center w-12 font-extrabold text-emerald-600 text-lg"><span id="time-display">1.0</span><span class="text-xs text-gray-500">s</span></div>
-                        <button onclick="changeDefaultTime(0.1)" class="w-8 h-8 flex justify-center items-center bg-emerald-100 text-emerald-700 rounded-full font-bold active:bg-emerald-200 active:scale-90"><i data-lucide="plus" class="w-4 h-4"></i></button>
+                        <button onclick="changeDefaultTime(-1)" class="w-8 h-8 flex justify-center items-center bg-gray-200 text-gray-600 rounded-full font-bold active:bg-gray-300 active:scale-90"><i data-lucide="minus" class="w-4 h-4"></i></button>
+                        <div class="text-center w-12 font-extrabold text-emerald-600 text-lg"><span id="time-display">1</span><span class="text-xs text-gray-500">s</span></div>
+                        <button onclick="changeDefaultTime(1)" class="w-8 h-8 flex justify-center items-center bg-emerald-100 text-emerald-700 rounded-full font-bold active:bg-emerald-200 active:scale-90"><i data-lucide="plus" class="w-4 h-4"></i></button>
                     </div>
                 </div>
 
@@ -147,9 +149,10 @@
         let program = [];
         let isExecuting = false;
         let abortExecution = false;
-        let defaultSetTime = 1.0; 
+        let defaultSetTime = 1; 
         
-        // ★変更: 画面の横幅を自動で判定して、PCなら最初からPCモードにする
+        let sortableInstance = null; 
+        
         let uiMode = localStorage.getItem('rcUIMode');
         if (!uiMode) {
             uiMode = window.innerWidth >= 768 ? 'pc' : 'sp';
@@ -176,17 +179,29 @@
 
             lucide.createIcons();
             updateUI();
-            applyUIMode(); // ★追加: 起動時に前回のモードを復元
+            applyUIMode(); 
+            
+            const listEl = document.getElementById('program-list');
+            sortableInstance = new Sortable(listEl, {
+                animation: 150,
+                handle: '.drag-handle',
+                onEnd: function (evt) {
+                    if (evt.oldIndex !== evt.newIndex) {
+                        const movedItem = program.splice(evt.oldIndex, 1)[0];
+                        program.splice(evt.newIndex, 0, movedItem);
+                        updateUI(); 
+                    }
+                }
+            });
         });
 
-        // ★追加: 画面モード切り替えの関数
+        // 画面モード切り替えの関数
         function setUIMode(mode) {
             uiMode = mode;
             localStorage.setItem('rcUIMode', mode);
             applyUIMode();
         }
 
-        // ★追加: モードに応じてクラスを切り替える関数
         function applyUIMode() {
             const appContainer = document.getElementById('app-container');
             const leftPane = document.getElementById('left-pane');
@@ -195,23 +210,19 @@
             const btnPc = document.getElementById('mode-pc');
 
             if (uiMode === 'pc') {
-                // PCモード: 全体を横並びにして幅を広げる
                 appContainer.className = "w-full max-w-5xl h-full flex flex-row bg-white shadow-2xl relative mx-auto transition-all duration-300";
                 leftPane.className = "w-96 flex flex-col flex-shrink-0 z-20 shadow-md border-r-4 border-gray-200 overflow-y-auto bg-gray-50 transition-all duration-300";
                 rightPane.className = "flex flex-col flex-1 relative bg-slate-50 overflow-hidden transition-all duration-300";
                 
-                // ボタンの見た目更新
                 btnPc.classList.add('bg-white', 'shadow', 'text-emerald-700');
                 btnPc.classList.remove('text-gray-500', 'hover:bg-gray-300');
                 btnSp.classList.remove('bg-white', 'shadow', 'text-emerald-700');
                 btnSp.classList.add('text-gray-500', 'hover:bg-gray-300');
             } else {
-                // スマホモード: 縦並びにして幅を制限する
                 appContainer.className = "w-full max-w-md h-full flex flex-col bg-white shadow-2xl relative mx-auto transition-all duration-300";
                 leftPane.className = "w-full flex flex-col flex-shrink-0 z-20 shadow-md transition-all duration-300";
                 rightPane.className = "flex flex-col flex-1 relative bg-slate-50 overflow-hidden transition-all duration-300";
                 
-                // ボタンの見た目更新
                 btnSp.classList.add('bg-white', 'shadow', 'text-emerald-700');
                 btnSp.classList.remove('text-gray-500', 'hover:bg-gray-300');
                 btnPc.classList.remove('bg-white', 'shadow', 'text-emerald-700');
@@ -221,9 +232,9 @@
 
         function changeDefaultTime(delta) {
             defaultSetTime += delta;
-            if (defaultSetTime < 0.1) defaultSetTime = 0.1;
-            if (defaultSetTime > 10.0) defaultSetTime = 10.0;
-            document.getElementById('time-display').textContent = defaultSetTime.toFixed(1);
+            if (defaultSetTime < 1) defaultSetTime = 1; 
+            if (defaultSetTime > 60) defaultSetTime = 60; 
+            document.getElementById('time-display').textContent = defaultSetTime.toString();
         }
 
         function addBlock(blockId) {
@@ -239,7 +250,7 @@
                 ...blockDef, 
                 uniqueId: Date.now(),
                 timeMs: msTime,
-                timeLabel: defaultSetTime.toFixed(1)
+                timeLabel: defaultSetTime.toString() 
             });
             updateUI();
             setTimeout(() => {
@@ -250,12 +261,12 @@
 
         function changeBlockTime(index, delta) {
             if (isExecuting) return;
-            let currentTimeSec = parseFloat(program[index].timeLabel);
+            let currentTimeSec = parseInt(program[index].timeLabel);
             currentTimeSec += delta;
-            if (currentTimeSec < 0.1) currentTimeSec = 0.1;
-            if (currentTimeSec > 10.0) currentTimeSec = 10.0;
-            program[index].timeLabel = currentTimeSec.toFixed(1);
-            program[index].timeMs = Math.round(currentTimeSec * 1000);
+            if (currentTimeSec < 1) currentTimeSec = 1; 
+            if (currentTimeSec > 60) currentTimeSec = 60;
+            program[index].timeLabel = currentTimeSec.toString();
+            program[index].timeMs = currentTimeSec * 1000;
             updateUI();
         }
 
@@ -284,14 +295,18 @@
                 item.className = `${block.bg} text-white p-2 rounded-xl flex items-center justify-between border-2 border-transparent transition-all shadow-sm`;
                 item.innerHTML = `
                     <div class="flex items-center gap-2 font-bold flex-1">
+                        <div class="drag-handle cursor-grab active:cursor-grabbing shrink-0 ${isExecuting ? 'text-white/20 pointer-events-none' : 'text-white/60 hover:text-white'}">
+                            <i data-lucide="grip-vertical" class="w-6 h-6"></i>
+                        </div>
+                        
                         <div class="bg-white/20 w-6 h-6 rounded-lg text-xs flex items-center justify-center shrink-0">${index + 1}</div>
                         <i data-lucide="${block.icon}" class="w-6 h-6 shrink-0 ${block.id !== 'W' && block.id !== 'S' ? 'fill-white' : ''}"></i>
                         <span class="text-sm truncate w-16 sm:w-auto">${block.label}</span>
                     </div>
                     <div class="flex items-center gap-1 sm:gap-2 mr-1">
-                        <button onclick="changeBlockTime(${index}, -0.1)" class="w-8 h-8 flex items-center justify-center bg-black/10 rounded-lg active:bg-black/30 transition-colors ${isExecuting ? 'pointer-events-none opacity-50' : ''}"><i data-lucide="minus" class="w-4 h-4"></i></button>
-                        <span class="text-sm font-extrabold w-10 text-center">${block.timeLabel}s</span>
-                        <button onclick="changeBlockTime(${index}, 0.1)" class="w-8 h-8 flex items-center justify-center bg-black/10 rounded-lg active:bg-black/30 transition-colors ${isExecuting ? 'pointer-events-none opacity-50' : ''}"><i data-lucide="plus" class="w-4 h-4"></i></button>
+                        <button onclick="changeBlockTime(${index}, -1)" class="w-8 h-8 flex items-center justify-center bg-black/10 rounded-lg active:bg-black/30 transition-colors ${isExecuting ? 'pointer-events-none opacity-50' : ''}"><i data-lucide="minus" class="w-4 h-4"></i></button>
+                        <span class="text-sm font-extrabold w-8 text-center">${block.timeLabel}s</span>
+                        <button onclick="changeBlockTime(${index}, 1)" class="w-8 h-8 flex items-center justify-center bg-black/10 rounded-lg active:bg-black/30 transition-colors ${isExecuting ? 'pointer-events-none opacity-50' : ''}"><i data-lucide="plus" class="w-4 h-4"></i></button>
                     </div>
                     <button onclick="removeBlock(${index})" class="bg-white/20 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/40 active:scale-90 transition-transform shrink-0 ${isExecuting ? 'hidden' : ''}"><i data-lucide="x" class="w-5 h-5"></i></button>
                 `;
@@ -314,16 +329,15 @@
 
             // 1. ESP32側のプログラムメモリをクリア
             await sendCommandToESP32("CLR:0");
-            await sleepWithAbort(200); // ★ウェイトを長くしてESP32の準備を待つ
+            await sleepWithAbort(200); 
 
             // 2. すべてのブロックの命令を一気に送信
             const speed = document.getElementById('pwm-speed').value;
             for (let i = 0; i < program.length; i++) {
                 if (abortExecution) break; 
                 const block = program[i];
-                // "ADD:F:200:1000" のような形で送る
                 await sendCommandToESP32(`ADD:${block.id}:${speed}:${block.timeMs}`);
-                await sleepWithAbort(150); // ★連続送信の詰まりを防ぐために間隔を広げる
+                await sleepWithAbort(150); 
             }
 
             if (abortExecution) {
@@ -350,13 +364,12 @@
 
                 await sleepWithAbort(program[i].timeMs);
             }
-            // 最後までハイライトが行っても、ESP32からの"FINISH"が来るまでは実行中状態を維持する
             removeHighlight();
         }
 
         async function emergencyStop() {
             abortExecution = true;
-            await sendCommandToESP32('S:0'); // 緊急停止
+            await sendCommandToESP32('S:0'); 
             removeHighlight();
             setExecutionMode(false);
             isExecuting = false;
@@ -409,6 +422,11 @@
                 document.getElementById('execute-content').classList.remove('hidden');
                 document.getElementById('execute-loader').classList.add('hidden');
             }
+            
+            if (sortableInstance) {
+                sortableInstance.option("disabled", executing);
+            }
+            
             updateUI();
         }
 
@@ -454,7 +472,6 @@
                     const service = await server.getPrimaryService(SERVICE_UUID);
                     cmdCharacteristic = await service.getCharacteristic(CMD_CHAR_UUID);
                     
-                    // ESP32からの通知（完了合図）を受け取る設定
                     txCharacteristic = await service.getCharacteristic(TX_CHAR_UUID);
                     await txCharacteristic.startNotifications();
                     txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
@@ -464,7 +481,7 @@
                     showToast("つながりました！", "bg-blue-600");
                 } catch (error) {
                     console.error(error);
-                    if (error.name !== 'NotFoundError') { // キャンセル以外
+                    if (error.name !== 'NotFoundError') { 
                         showToast("せつぞくしっぱい", "bg-red-500");
                     }
                 }
@@ -477,9 +494,8 @@
             updateBleUI(false);
             showToast("きれました。さいせつぞく中...", "bg-orange-500");
             
-            if (isExecuting) emergencyStop(); // 切断時は実行状態を解除
+            if (isExecuting) emergencyStop(); 
 
-            // 自動再接続を開始
             if (reconnectTimer) clearTimeout(reconnectTimer);
             reconnectTimer = setTimeout(attemptReconnect, 2000);
         }
@@ -518,7 +534,6 @@
             }
         }
 
-        // ESP32からの通知を受け取った時の処理
         function handleNotifications(event) {
             const value = new TextDecoder().decode(event.target.value);
             console.log("ESP32からの通信:", value);
@@ -531,7 +546,6 @@
             }
         }
 
-        // ESP32へのコマンド送信 ("S:0" や "ADD:F:200:1000" など)
         async function sendCommandToESP32(commandString) {
             if (!cmdCharacteristic) return;
             
@@ -540,11 +554,9 @@
                 await cmdCharacteristic.writeValue(encoder.encode(commandString));
             } catch (error) {
                 console.warn("送信エラー:", error, "コマンド:", commandString);
-                // ★通信が少し混み合っただけで強制切断されないように、切断処理を削除
             }
         }
 
-        // 1秒ごとにPingを送り、ESP32側のフェイルセーフ(3秒)を回避する
         setInterval(() => {
             if (bleDevice && bleDevice.gatt.connected && !isExecuting) {
                 sendCommandToESP32('ping');
