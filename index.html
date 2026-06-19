@@ -1,406 +1,497 @@
-#include <Arduino.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
-#include "soc/soc.h"           // ★追加: ブラウンアウト対策用
-#include "soc/rtc_cntl_reg.h"  // ★追加: ブラウンアウト対策用
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ラジコンプログラミング (Bluetooth)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background-color: #f0fdf4;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 
-// =============================================================================
-// ピン設定
-// =============================================================================
-const int motorA_IN1 = 27;
-const int motorA_IN2 = 32;
-const int motorB_IN1 = 26;
-const int motorB_IN2 = 25;
-
-// =============================================================================
-// PWM設定
-// =============================================================================
-const int PWM_FREQ       = 20000;
-const int PWM_RESOLUTION = 8;      // 0-255
-
-// =============================================================================
-// ソフトスタート設定
-// =============================================================================
-const int RAMP_STEP_SIZE   = 2;   // ★変更: 5→2に減らし、よりゆっくり加速させる
-const int RAMP_INTERVAL_MS = 15;  // ★変更: 10→15に伸ばし、電池の負担を和らげる
-
-// =============================================================================
-// デッドタイム設定
-// =============================================================================
-const int DEADTIME_MS = 100;  // 方向切替前の停止時間
-
-// =============================================================================
-// 制御用変数
-// =============================================================================
-volatile int  targetSpeed  = 200;
-volatile int  currentSpeed = 0;
-String        currentMotion = "stop";
-
-// =============================================================================
-// プログラミング自律実行用変数
-// =============================================================================
-struct ProgramStep {
-    char direction[10];
-    int speed;
-    int durationMs;
-};
-ProgramStep programList[35]; // 最大30ステップ+余裕
-volatile int programCount = 0;
-volatile bool isExecutingProgram = false;
-int currentProgramIndex = 0;
-unsigned long stepStartTime = 0;
-
-// =============================================================================
-// フェールセーフ
-// =============================================================================
-volatile unsigned long lastCommunicationTime = 0;
-const unsigned long    FAILSAFE_TIMEOUT      = 3000;
-
-// =============================================================================
-// BLE設定
-// =============================================================================
-BLEServer         *pServer           = NULL;
-BLECharacteristic *pRxCharacteristic = NULL;
-BLECharacteristic *pTxCharacteristic = NULL; // スマホへの通知用
-bool deviceConnected    = false;
-bool oldDeviceConnected = false;
-
-#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-
-// =============================================================================
-// タスク間通信用キュー
-// =============================================================================
-struct MotorCommand {
-    char direction[20];
-    int  speed;
-};
-QueueHandle_t motorCmdQueue;
-
-// =============================================================================
-// DRV8835 IN/INモード 低レベル出力
-// =============================================================================
-void hardCoastAll() {
-    ledcWrite(motorA_IN1, 0);
-    ledcWrite(motorA_IN2, 0);
-    ledcWrite(motorB_IN1, 0);
-    ledcWrite(motorB_IN2, 0);
-}
-
-void setMotorA(bool forward, int speed) {
-    if (forward) {
-        ledcWrite(motorA_IN2, 0);
-        ledcWrite(motorA_IN1, speed);
-    } else {
-        ledcWrite(motorA_IN1, 0);
-        ledcWrite(motorA_IN2, speed);
-    }
-}
-
-void setMotorB(bool forward, int speed) {
-    if (forward) {
-        ledcWrite(motorB_IN1, 0);
-        ledcWrite(motorB_IN2, speed);
-    } else {
-        ledcWrite(motorB_IN2, 0);
-        ledcWrite(motorB_IN1, speed);
-    }
-}
-
-// =============================================================================
-// ソフトスタート付きモーター駆動
-// =============================================================================
-void driveWithRamp(bool dirA, bool dirB, const char* expectedMotion) {
-    int spd = currentSpeed;
-    int tgt = (int)targetSpeed;
-
-    while (spd < tgt) {
-        MotorCommand nextCmd;
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(253, 224, 71, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(253, 224, 71, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(253, 224, 71, 0); }
+        }
+        .executing-block {
+            transform: scale(1.02);
+            border-color: #fde047 !important;
+            animation: pulse-ring 1s infinite;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="h-screen w-full overflow-hidden text-gray-800 flex justify-center">
+    
+    <div class="w-full max-w-md h-full flex flex-col bg-white shadow-2xl relative">
         
-        // 次に待っているコマンドを確認
-        if (xQueuePeek(motorCmdQueue, &nextCmd, 0) == pdTRUE) {
-            // 同じ方向で同じ速度なら無視して加速継続
-            if (strcmp(nextCmd.direction, expectedMotion) == 0 && nextCmd.speed == tgt) {
-                xQueueReceive(motorCmdQueue, &nextCmd, 0);
-            } else {
-                // 違うコマンド（stop等）が来た場合は即座に加速中断
-                currentSpeed = spd;
+        <!-- ヘッダー -->
+        <header class="bg-emerald-500 text-white p-3 flex justify-between items-center shadow-md z-20">
+            <h1 class="text-lg font-extrabold flex items-center gap-2">
+                <i data-lucide="bot" class="w-6 h-6"></i> ラジコンプログラミング
+            </h1>
+            <div class="flex items-center gap-2">
+                <!-- Bluetooth接続ボタン -->
+                <button id="btn-connect" onclick="toggleBluetooth()" class="flex items-center gap-1 bg-gray-400 px-3 py-1.5 rounded-full text-sm font-bold transition-colors active:scale-90 shadow-sm">
+                    <i id="ble-icon" data-lucide="bluetooth" class="w-4 h-4"></i>
+                    <span id="ble-text">つなぐ</span>
+                </button>
+                <button onclick="toggleSettings()" class="p-2 bg-emerald-600 rounded-full active:scale-90 transition-transform">
+                    <i data-lucide="settings" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- 設定エリア -->
+        <div id="settings-area" class="hidden bg-emerald-50 p-4 border-b-2 border-emerald-200 z-10 shadow-inner">
+            <div>
+                <div class="flex justify-between mb-1">
+                    <label class="text-sm font-bold text-emerald-800">モーターのはやさ (0〜255)</label>
+                    <span id="pwm-display" class="font-bold text-emerald-700">200</span>
+                </div>
+                <input type="range" id="pwm-speed" min="0" max="255" value="200" class="w-full accent-emerald-500">
+                <p class="text-xs text-emerald-600 mt-1 font-bold">はやさを変えると曲がりやすさも変わるよ！</p>
+            </div>
+        </div>
+
+        <!-- ブロックパレット -->
+        <div class="p-3 bg-gray-100 border-b-4 border-gray-200 z-10" id="palette-area">
+            <div class="flex items-center justify-between bg-white rounded-xl p-2 mb-3 shadow-sm border border-gray-200">
+                <div class="text-xs font-bold text-gray-500 leading-tight">ついかするときの<br>うごくじかん</div>
+                <div class="flex items-center gap-3">
+                    <button onclick="changeDefaultTime(-0.1)" class="w-8 h-8 flex justify-center items-center bg-gray-200 text-gray-600 rounded-full font-bold active:bg-gray-300 active:scale-90"><i data-lucide="minus" class="w-4 h-4"></i></button>
+                    <div class="text-center w-12 font-extrabold text-emerald-600 text-lg"><span id="time-display">1.0</span><span class="text-xs text-gray-500">s</span></div>
+                    <button onclick="changeDefaultTime(0.1)" class="w-8 h-8 flex justify-center items-center bg-emerald-100 text-emerald-700 rounded-full font-bold active:bg-emerald-200 active:scale-90"><i data-lucide="plus" class="w-4 h-4"></i></button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2" id="palette">
+                <!-- JSで生成 -->
+            </div>
+        </div>
+
+        <!-- プログラムリスト -->
+        <div class="flex-1 overflow-y-auto p-4 bg-slate-50 relative" id="program-container">
+            <div id="empty-message" class="absolute inset-0 flex flex-col items-center justify-center text-gray-300 pointer-events-none">
+                <i data-lucide="list-plus" class="w-16 h-16 mb-2 opacity-50"></i>
+                <p class="font-bold">ブロックをならべてね</p>
+            </div>
+            <div id="program-list" class="flex flex-col gap-2 pb-4"></div>
+        </div>
+
+        <!-- コントロールボタン -->
+        <div class="p-3 bg-white border-t-4 border-gray-200 flex flex-col gap-2 z-20 pb-6 sm:pb-4">
+            <div class="flex gap-2 h-14">
+                <button onclick="clearProgram()" id="btn-clear" class="flex-[1] bg-gray-200 text-gray-600 font-bold rounded-xl flex items-center justify-center gap-1 active:bg-gray-300 active:translate-y-1 transition-all border-b-4 border-gray-300">
+                    <i data-lucide="trash-2" class="w-5 h-5"></i> ぜんぶけす
+                </button>
+                <button onclick="emergencyStop()" class="flex-[1.5] bg-red-500 text-white font-extrabold rounded-xl flex items-center justify-center gap-1 active:bg-red-600 active:translate-y-1 transition-all border-b-4 border-red-700">
+                    <i data-lucide="octagon-alert" class="w-6 h-6"></i> とまれ！
+                </button>
+            </div>
+            <button onclick="executeProgram()" id="btn-execute" class="w-full h-16 bg-emerald-500 text-white font-extrabold rounded-xl flex items-center justify-center gap-2 active:bg-emerald-600 active:translate-y-1 transition-all border-b-4 border-emerald-700 relative overflow-hidden">
+                <div id="execute-content" class="flex items-center gap-2">
+                    <i data-lucide="play" class="w-8 h-8 fill-white"></i>
+                    <span class="text-xl tracking-wider">じっこう！</span>
+                </div>
+                <div id="execute-loader" class="hidden flex items-center gap-2">
+                    <i data-lucide="loader-2" class="animate-spin w-8 h-8"></i>
+                    <span class="text-xl tracking-wider">うごき中...</span>
+                </div>
+            </button>
+        </div>
+
+        <!-- トースト通知 -->
+        <div id="toast" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/80 text-white px-6 py-4 rounded-3xl text-xl font-bold transition-opacity duration-300 opacity-0 pointer-events-none z-50 whitespace-nowrap shadow-xl">
+            メッセージ
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // UI・プログラム管理
+        // ==========================================
+        const blockTypes = [
+            { id: 'F', label: 'すすむ', icon: 'arrow-big-up', bg: 'bg-sky-400', border: 'border-sky-500' },
+            { id: 'B', label: 'さがる', icon: 'arrow-big-down', bg: 'bg-pink-400', border: 'border-pink-500' },
+            { id: 'R', label: 'みぎまわり', icon: 'redo', bg: 'bg-orange-400', border: 'border-orange-500' },
+            { id: 'L', label: 'ひだりまわり', icon: 'undo', bg: 'bg-purple-400', border: 'border-purple-500' },
+            { id: 'W', label: 'まつ', icon: 'hourglass', bg: 'bg-slate-400', border: 'border-slate-500' },
+            { id: 'S', label: 'とまる', icon: 'octagon', bg: 'bg-red-500', border: 'border-red-600' }
+        ];
+
+        let program = [];
+        let isExecuting = false;
+        let abortExecution = false;
+        let defaultSetTime = 1.0; 
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const palette = document.getElementById('palette');
+            blockTypes.forEach(block => {
+                const btn = document.createElement('button');
+                btn.className = `${block.bg} text-white p-2 rounded-xl flex flex-col items-center justify-center font-bold border-b-4 ${block.border} active:border-b-0 active:translate-y-1 transition-all shadow-sm`;
+                btn.innerHTML = `
+                    <i data-lucide="${block.icon}" class="w-6 h-6 mb-1 ${block.id !== 'W' && block.id !== 'S' ? 'fill-white' : ''}"></i>
+                    <span class="text-xs">${block.label}</span>
+                `;
+                btn.onclick = () => addBlock(block.id);
+                palette.appendChild(btn);
+            });
+
+            const pwmSpeed = document.getElementById('pwm-speed');
+            const pwmDisplay = document.getElementById('pwm-display');
+            pwmSpeed.addEventListener('input', (e) => {
+                pwmDisplay.textContent = e.target.value;
+            });
+
+            lucide.createIcons();
+            updateUI();
+        });
+
+        function changeDefaultTime(delta) {
+            defaultSetTime += delta;
+            if (defaultSetTime < 0.1) defaultSetTime = 0.1;
+            if (defaultSetTime > 10.0) defaultSetTime = 10.0;
+            document.getElementById('time-display').textContent = defaultSetTime.toFixed(1);
+        }
+
+        function addBlock(blockId) {
+            if (isExecuting) return;
+            if (program.length >= 30) {
+                showToast("ブロックはいっぱいです！", "bg-orange-500");
                 return;
             }
-        }
-
-        spd = min(spd + RAMP_STEP_SIZE, tgt);
-        setMotorA(dirA, spd);
-        setMotorB(dirB, spd);
-        vTaskDelay(pdMS_TO_TICKS(RAMP_INTERVAL_MS));
-    }
-    setMotorA(dirA, tgt);
-    setMotorB(dirB, tgt);
-    currentSpeed = tgt;
-}
-
-// =============================================================================
-// モーター制御コマンドのディスパッチ
-// =============================================================================
-void dispatchMotorCommand(const char* direction, int speed) {
-    targetSpeed = (int)constrain(speed, 0, 255);
-    String dirStr = String(direction);
-
-    // ブロックUIからの文字(F, B, L, R, S, W)を内部の制御名に変換
-    if (dirStr == "F") dirStr = "up";
-    else if (dirStr == "B") dirStr = "down";
-    else if (dirStr == "L") dirStr = "left";
-    else if (dirStr == "R") dirStr = "right";
-    else if (dirStr == "S") dirStr = "stop";
-
-    Serial.printf("[Motor] cmd=%s spd=%d\n", dirStr.c_str(), (int)targetSpeed);
-
-    if (dirStr == "stop") {
-        hardCoastAll(); 
-        currentSpeed = 0; 
-        currentMotion = "stop";
-        return;
-    }
-
-    if (dirStr == "W") { // W(まつ)の場合はモーターを止めて状態だけWにする
-        hardCoastAll(); 
-        currentSpeed = 0; 
-        currentMotion = "W";
-        return;
-    }
-
-    // 方向切替時のデッドタイム
-    bool needDeadtime = (currentMotion != dirStr);
-    if (needDeadtime && currentMotion != "stop" && currentMotion != "W") {
-        hardCoastAll(); 
-        vTaskDelay(pdMS_TO_TICKS(DEADTIME_MS));
-    }
-
-    currentMotion = dirStr;
-
-    if (dirStr == "up") {
-        driveWithRamp(true, true, "up");
-    }
-    else if (dirStr == "down") {
-        driveWithRamp(false, false, "down");
-    }
-    else if (dirStr == "left") {
-        driveWithRamp(true, false, "left");
-    }
-    else if (dirStr == "right") {
-        driveWithRamp(false, true, "right");
-    }
-}
-
-// =============================================================================
-// BLEコールバック (Core0)
-// =============================================================================
-class MyServerCallbacks : public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) override {
-        deviceConnected = true;
-        lastCommunicationTime = millis();
-        Serial.println("[BLE] Connected");
-    }
-    void onDisconnect(BLEServer* pServer) override {
-        deviceConnected = false;
-        Serial.println("[BLE] Disconnected");
-        // ※通信が切れてもプログラム実行中の場合はストップさせない
-    }
-};
-
-class MyCallbacks : public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) override {
-        String rxValue = pCharacteristic->getValue().c_str();
-        if (rxValue.length() == 0) return;
-
-        lastCommunicationTime = millis();
-        if (rxValue == "ping") return;
-
-        int sep1 = rxValue.indexOf(':');
-        if (sep1 == -1) return;
-
-        String cmd = rxValue.substring(0, sep1);
-        String remain = rxValue.substring(sep1 + 1);
-
-        // プログラム追加 "ADD:F:200:1000"
-        if (cmd == "ADD") {
-            int sep2 = remain.indexOf(':');
-            int sep3 = remain.lastIndexOf(':');
-            if (sep2 != -1 && sep3 != -1 && sep2 != sep3) {
-                String dir = remain.substring(0, sep2);
-                int spd = remain.substring(sep2 + 1, sep3).toInt();
-                int ms = remain.substring(sep3 + 1).toInt();
-                if (programCount < 35) {
-                    strncpy(programList[programCount].direction, dir.c_str(), sizeof(programList[programCount].direction) - 1);
-                    programList[programCount].speed = spd;
-                    programList[programCount].durationMs = ms;
-                    programCount++;
-                    Serial.printf("Added to Prog[%d]: %s %d %dms\n", programCount-1, dir.c_str(), spd, ms);
-                }
-            }
-        } 
-        // プログラムクリア "CLR:0"
-        else if (cmd == "CLR") {
-            programCount = 0;
-            Serial.println("Program Cleared.");
-        } 
-        // プログラム実行 "RUN:0"
-        else if (cmd == "RUN") {
-            MotorCommand mcmd;
-            strcpy(mcmd.direction, "RUN");
-            mcmd.speed = 0;
-            xQueueSend(motorCmdQueue, &mcmd, pdMS_TO_TICKS(10));
-        } 
-        // 通常コマンド (手動や緊急停止など) "S:0"
-        else {
-            MotorCommand mcmd;
-            strncpy(mcmd.direction, cmd.c_str(), sizeof(mcmd.direction) - 1);
-            mcmd.speed = remain.toInt();
+            const blockDef = blockTypes.find(b => b.id === blockId);
+            const msTime = Math.round(defaultSetTime * 1000);
             
-            if (xQueueSend(motorCmdQueue, &mcmd, pdMS_TO_TICKS(10)) == errQUEUE_FULL) {
-                MotorCommand dummy;
-                xQueueReceive(motorCmdQueue, &dummy, 0);
-                xQueueSend(motorCmdQueue, &mcmd, 0);
-            }
+            program.push({ 
+                ...blockDef, 
+                uniqueId: Date.now(),
+                timeMs: msTime,
+                timeLabel: defaultSetTime.toFixed(1)
+            });
+            updateUI();
+            setTimeout(() => {
+                const container = document.getElementById('program-container');
+                container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            }, 50);
         }
-    }
-};
 
-// =============================================================================
-// モータータスク (Core1)
-// =============================================================================
-void motorTask(void* pvParameters) {
-    MotorCommand cmd;
-    for (;;) {
-        // 1. キューから命令を受け取る
-        if (xQueueReceive(motorCmdQueue, &cmd, pdMS_TO_TICKS(10)) == pdTRUE) {
+        function changeBlockTime(index, delta) {
+            if (isExecuting) return;
+            let currentTimeSec = parseFloat(program[index].timeLabel);
+            currentTimeSec += delta;
+            if (currentTimeSec < 0.1) currentTimeSec = 0.1;
+            if (currentTimeSec > 10.0) currentTimeSec = 10.0;
+            program[index].timeLabel = currentTimeSec.toFixed(1);
+            program[index].timeMs = Math.round(currentTimeSec * 1000);
+            updateUI();
+        }
+
+        function removeBlock(index) {
+            if (isExecuting) return;
+            program.splice(index, 1);
+            updateUI();
+        }
+
+        function clearProgram() {
+            if (isExecuting || program.length === 0) return;
+            program = [];
+            updateUI();
+        }
+
+        function updateUI() {
+            const listEl = document.getElementById('program-list');
+            const emptyMsg = document.getElementById('empty-message');
             
-            if (strcmp(cmd.direction, "RUN") == 0) {
-                // プログラム実行開始
-                if (programCount > 0) {
-                    isExecutingProgram = true;
-                    currentProgramIndex = 0;
-                    stepStartTime = millis();
-                    Serial.println("[Program] Execution Started!");
-                    dispatchMotorCommand(programList[0].direction, programList[0].speed);
-                }
-            } 
-            else if (strcmp(cmd.direction, "stop") == 0 || strcmp(cmd.direction, "S") == 0) {
-                // ストップが送られた場合はプログラム実行を強制中断
-                isExecutingProgram = false;
-                dispatchMotorCommand("stop", 0);
-            } 
-            else {
-                // その他の手動コマンド（手動操作でプログラム割り込み）
-                isExecutingProgram = false; 
-                dispatchMotorCommand(cmd.direction, cmd.speed);
-            }
+            emptyMsg.style.display = program.length === 0 ? 'flex' : 'none';
+            listEl.innerHTML = '';
+            
+            program.forEach((block, index) => {
+                const item = document.createElement('div');
+                item.id = `block-${index}`;
+                item.className = `${block.bg} text-white p-2 rounded-xl flex items-center justify-between border-2 border-transparent transition-all shadow-sm`;
+                item.innerHTML = `
+                    <div class="flex items-center gap-2 font-bold flex-1">
+                        <div class="bg-white/20 w-6 h-6 rounded-lg text-xs flex items-center justify-center shrink-0">${index + 1}</div>
+                        <i data-lucide="${block.icon}" class="w-6 h-6 shrink-0 ${block.id !== 'W' && block.id !== 'S' ? 'fill-white' : ''}"></i>
+                        <span class="text-sm truncate w-16 sm:w-auto">${block.label}</span>
+                    </div>
+                    <div class="flex items-center gap-1 sm:gap-2 mr-1">
+                        <button onclick="changeBlockTime(${index}, -0.1)" class="w-8 h-8 flex items-center justify-center bg-black/10 rounded-lg active:bg-black/30 transition-colors ${isExecuting ? 'pointer-events-none opacity-50' : ''}"><i data-lucide="minus" class="w-4 h-4"></i></button>
+                        <span class="text-sm font-extrabold w-10 text-center">${block.timeLabel}s</span>
+                        <button onclick="changeBlockTime(${index}, 0.1)" class="w-8 h-8 flex items-center justify-center bg-black/10 rounded-lg active:bg-black/30 transition-colors ${isExecuting ? 'pointer-events-none opacity-50' : ''}"><i data-lucide="plus" class="w-4 h-4"></i></button>
+                    </div>
+                    <button onclick="removeBlock(${index})" class="bg-white/20 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/40 active:scale-90 transition-transform shrink-0 ${isExecuting ? 'hidden' : ''}"><i data-lucide="x" class="w-5 h-5"></i></button>
+                `;
+                listEl.appendChild(item);
+            });
+            lucide.createIcons();
         }
 
-        // 2. 自律プログラム実行中の処理
-        if (isExecutingProgram) {
-            unsigned long now = millis();
-            if (now - stepStartTime >= (unsigned long)programList[currentProgramIndex].durationMs) {
-                // 指定時間が経過したので次のステップへ
-                currentProgramIndex++;
-                if (currentProgramIndex >= programCount) {
-                    // 全ステップ完了
-                    isExecutingProgram = false;
-                    dispatchMotorCommand("stop", 0);
-                    Serial.println("[Program] All Steps Finished!");
-                    
-                    // ★スマホ側に完了を通知する
-                    if (deviceConnected && pTxCharacteristic != NULL) {
-                        pTxCharacteristic->setValue("FINISH");
-                        pTxCharacteristic->notify();
+        async function executeProgram() {
+            if (isExecuting || program.length === 0) return;
+            if (!bleDevice || !bleDevice.gatt.connected) {
+                showToast("Bluetoothをつないでね！", "bg-red-500");
+                return;
+            }
+            
+            isExecuting = true;
+            abortExecution = false;
+            setExecutionMode(true);
+            showToast("プログラムをそうしん中...", "bg-blue-500");
+
+            // 1. ESP32側のプログラムメモリをクリア
+            await sendCommandToESP32("CLR:0");
+            await sleepWithAbort(200); // ★ウェイトを長くしてESP32の準備を待つ
+
+            // 2. すべてのブロックの命令を一気に送信
+            const speed = document.getElementById('pwm-speed').value;
+            for (let i = 0; i < program.length; i++) {
+                if (abortExecution) break; 
+                const block = program[i];
+                // "ADD:F:200:1000" のような形で送る
+                await sendCommandToESP32(`ADD:${block.id}:${speed}:${block.timeMs}`);
+                await sleepWithAbort(150); // ★連続送信の詰まりを防ぐために間隔を広げる
+            }
+
+            if (abortExecution) {
+                setExecutionMode(false);
+                isExecuting = false;
+                return;
+            }
+
+            // 3. 実行スタートの合図を送る
+            await sendCommandToESP32("RUN:0");
+            showToast("ロボットが動きます！", "bg-emerald-500");
+
+            // 4. UI側のアニメーション（完了判定はESP32からの通信に任せる）
+            runUIAnimation();
+        }
+
+        async function runUIAnimation() {
+            for (let i = 0; i < program.length; i++) {
+                if (abortExecution || !isExecuting) break; 
+                highlightBlock(i);
+                
+                const blockEl = document.getElementById(`block-${i}`);
+                if(blockEl) blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                await sleepWithAbort(program[i].timeMs);
+            }
+            // 最後までハイライトが行っても、ESP32からの"FINISH"が来るまでは実行中状態を維持する
+            removeHighlight();
+        }
+
+        async function emergencyStop() {
+            abortExecution = true;
+            await sendCommandToESP32('S:0'); // 緊急停止
+            removeHighlight();
+            setExecutionMode(false);
+            isExecuting = false;
+            showToast("とまりました！", "bg-red-600");
+        }
+
+        function sleepWithAbort(ms) {
+            return new Promise(resolve => {
+                const interval = 50;
+                let elapsed = 0;
+                const timer = setInterval(() => {
+                    elapsed += interval;
+                    if (abortExecution || elapsed >= ms) {
+                        clearInterval(timer);
+                        resolve();
                     }
-                } else {
-                    // 次の命令を実行
-                    stepStartTime = millis();
-                    dispatchMotorCommand(programList[currentProgramIndex].direction, programList[currentProgramIndex].speed);
-                }
+                }, interval);
+            });
+        }
+
+        function highlightBlock(index) {
+            removeHighlight();
+            const blockEl = document.getElementById(`block-${index}`);
+            if (blockEl) blockEl.classList.add('executing-block');
+        }
+
+        function removeHighlight() {
+            document.querySelectorAll('.executing-block').forEach(el => el.classList.remove('executing-block'));
+        }
+
+        function setExecutionMode(executing) {
+            const paletteArea = document.getElementById('palette-area');
+            const btnClear = document.getElementById('btn-clear');
+            const btnExecute = document.getElementById('btn-execute');
+            
+            if (executing) {
+                paletteArea.classList.add('opacity-50', 'pointer-events-none');
+                btnClear.classList.add('opacity-50', 'pointer-events-none');
+                btnExecute.classList.add('pointer-events-none');
+                btnExecute.classList.replace('bg-emerald-500', 'bg-yellow-500');
+                btnExecute.classList.replace('border-emerald-700', 'border-yellow-600');
+                document.getElementById('execute-content').classList.add('hidden');
+                document.getElementById('execute-loader').classList.remove('hidden');
+            } else {
+                paletteArea.classList.remove('opacity-50', 'pointer-events-none');
+                btnClear.classList.remove('opacity-50', 'pointer-events-none');
+                btnExecute.classList.remove('pointer-events-none');
+                btnExecute.classList.replace('bg-yellow-500', 'bg-emerald-500');
+                btnExecute.classList.replace('border-yellow-600', 'border-emerald-700');
+                document.getElementById('execute-content').classList.remove('hidden');
+                document.getElementById('execute-loader').classList.add('hidden');
             }
-        } 
-        // 3. プログラム実行中でない時のみフェイルセーフを監視
-        else {
-            if (deviceConnected && currentMotion != "stop" && currentMotion != "W") {
-                if (millis() - lastCommunicationTime > FAILSAFE_TIMEOUT) {
-                    Serial.println("[Failsafe] Timeout -> stop");
-                    dispatchMotorCommand("stop", 0);
+            updateUI();
+        }
+
+        function toggleSettings() {
+            if(isExecuting) return;
+            document.getElementById('settings-area').classList.toggle('hidden');
+        }
+
+        function showToast(message, bgColorClass = "bg-black/80") {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white px-6 py-4 rounded-3xl text-xl font-bold transition-opacity duration-300 opacity-0 pointer-events-none z-50 whitespace-nowrap shadow-xl ${bgColorClass}`;
+            requestAnimationFrame(() => toast.classList.remove('opacity-0'));
+            setTimeout(() => toast.classList.add('opacity-0'), 2000);
+        }
+
+        // ==========================================
+        // Web Bluetooth API (通信処理)
+        // ==========================================
+        const SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
+        const CMD_CHAR_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
+        const TX_CHAR_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
+        
+        let bleDevice = null;
+        let cmdCharacteristic = null;
+        let txCharacteristic = null;
+        let reconnectTimer = null;
+
+        async function toggleBluetooth() {
+            if (bleDevice && bleDevice.gatt.connected) {
+                bleDevice.gatt.disconnect();
+            } else {
+                try {
+                    bleDevice = await navigator.bluetooth.requestDevice({
+                        filters: [{ name: 'ESP32-Bulldozer' }],
+                        optionalServices: [SERVICE_UUID]
+                    });
+                    
+                    bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+                    
+                    showToast("つないでいます...", "bg-blue-500");
+                    const server = await bleDevice.gatt.connect();
+                    const service = await server.getPrimaryService(SERVICE_UUID);
+                    cmdCharacteristic = await service.getCharacteristic(CMD_CHAR_UUID);
+                    
+                    // ESP32からの通知（完了合図）を受け取る設定
+                    txCharacteristic = await service.getCharacteristic(TX_CHAR_UUID);
+                    await txCharacteristic.startNotifications();
+                    txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+                    
+                    updateBleUI(true);
+                    if (reconnectTimer) clearTimeout(reconnectTimer);
+                    showToast("つながりました！", "bg-blue-600");
+                } catch (error) {
+                    console.error(error);
+                    if (error.name !== 'NotFoundError') { // キャンセル以外
+                        showToast("せつぞくしっぱい", "bg-red-500");
+                    }
                 }
             }
         }
-    }
-}
 
-// =============================================================================
-// setup
-// =============================================================================
-void setup() {
-    // ★追加: 電圧降下によるESP32の勝手な再起動(ブラウンアウト)を無効にする
-    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+        function onDisconnected() {
+            cmdCharacteristic = null;
+            txCharacteristic = null;
+            updateBleUI(false);
+            showToast("きれました。さいせつぞく中...", "bg-orange-500");
+            
+            if (isExecuting) emergencyStop(); // 切断時は実行状態を解除
 
-    Serial.begin(115200);
+            // 自動再接続を開始
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(attemptReconnect, 2000);
+        }
 
-    ledcAttach(motorA_IN1, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(motorA_IN2, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(motorB_IN1, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(motorB_IN2, PWM_FREQ, PWM_RESOLUTION);
-    hardCoastAll(); 
+        async function attemptReconnect() {
+            if (!bleDevice) return;
+            try {
+                console.log("再接続を試みます...");
+                const server = await bleDevice.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                cmdCharacteristic = await service.getCharacteristic(CMD_CHAR_UUID);
+                
+                txCharacteristic = await service.getCharacteristic(TX_CHAR_UUID);
+                await txCharacteristic.startNotifications();
+                txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
 
-    motorCmdQueue = xQueueCreate(5, sizeof(MotorCommand));
+                updateBleUI(true);
+                showToast("さいせつぞくしました！", "bg-blue-600");
+            } catch (error) {
+                console.warn("再接続失敗、リトライします...", error);
+                reconnectTimer = setTimeout(attemptReconnect, 3000);
+            }
+        }
 
-    BLEDevice::init("ESP32-Bulldozer");
-    BLEDevice::setPower(ESP_PWR_LVL_N9); 
+        function updateBleUI(connected) {
+            const btn = document.getElementById('btn-connect');
+            const text = document.getElementById('ble-text');
+            const icon = document.getElementById('ble-icon');
+            
+            if (connected) {
+                btn.className = "flex items-center gap-1 bg-blue-500 text-white px-3 py-1.5 rounded-full text-sm font-bold transition-colors active:scale-90 shadow-md";
+                text.textContent = "つながってる";
+            } else {
+                btn.className = "flex items-center gap-1 bg-gray-400 text-white px-3 py-1.5 rounded-full text-sm font-bold transition-colors active:scale-90 shadow-sm";
+                text.textContent = "つなぐ";
+            }
+        }
 
-    pServer = BLEDevice::createServer();
-    pServer->setCallbacks(new MyServerCallbacks());
+        // ESP32からの通知を受け取った時の処理
+        function handleNotifications(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            console.log("ESP32からの通信:", value);
+            
+            if (value === "FINISH" && isExecuting) {
+                isExecuting = false;
+                removeHighlight();
+                setExecutionMode(false);
+                showToast("おわりました！", "bg-emerald-500");
+            }
+        }
 
-    BLEService *pService = pServer->createService(SERVICE_UUID);
+        // ESP32へのコマンド送信 ("S:0" や "ADD:F:200:1000" など)
+        async function sendCommandToESP32(commandString) {
+            if (!cmdCharacteristic) return;
+            
+            try {
+                const encoder = new TextEncoder();
+                await cmdCharacteristic.writeValue(encoder.encode(commandString));
+            } catch (error) {
+                console.warn("送信エラー:", error, "コマンド:", commandString);
+                // ★通信が少し混み合っただけで強制切断されないように、切断処理を削除
+            }
+        }
 
-    pRxCharacteristic = pService->createCharacteristic(
-        CHARACTERISTIC_UUID_RX,
-        BLECharacteristic::PROPERTY_WRITE |
-        BLECharacteristic::PROPERTY_WRITE_NR
-    );
-    pRxCharacteristic->setCallbacks(new MyCallbacks());
+        // 1秒ごとにPingを送り、ESP32側のフェイルセーフ(3秒)を回避する
+        setInterval(() => {
+            if (bleDevice && bleDevice.gatt.connected && !isExecuting) {
+                sendCommandToESP32('ping');
+            }
+        }, 1000);
 
-    // ★スマホへの通知用Characteristicを初期化
-    pTxCharacteristic = pService->createCharacteristic(
-        CHARACTERISTIC_UUID_TX,
-        BLECharacteristic::PROPERTY_NOTIFY
-    );
-    pTxCharacteristic->addDescriptor(new BLE2902());
-
-    pService->start();
-
-    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID);
-    pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);
-    pAdvertising->setMaxPreferred(0x12);
-    BLEDevice::startAdvertising();
-
-    xTaskCreatePinnedToCore(motorTask, "MotorTask", 4096, NULL, 2, NULL, 1);
-
-    Serial.println("[System] Ready. BLE=Core0 Motor=Core1");
-}
-
-// =============================================================================
-// loop (Core0)
-// =============================================================================
-void loop() {
-    if (!deviceConnected && oldDeviceConnected) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-        pServer->startAdvertising();
-        Serial.println("[BLE] Restarting advertising instantly");
-        oldDeviceConnected = false;
-    }
-    if (deviceConnected && !oldDeviceConnected) {
-        oldDeviceConnected = true;
-    }
-    vTaskDelay(pdMS_TO_TICKS(10)); 
-}
+    </script>
+</body>
+</html>
