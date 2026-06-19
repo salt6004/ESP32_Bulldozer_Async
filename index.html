@@ -6,7 +6,6 @@
     <title>ラジコンプログラミング (Bluetooth)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- ★追加: ドラッグ＆ドロップ用のライブラリ (SortableJS) -->
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
     
@@ -39,7 +38,7 @@
     
     <div id="app-container" class="w-full max-w-md h-full flex flex-col bg-white shadow-2xl relative mx-auto transition-all duration-300">
         
-        <!-- 左ペイン（スマホ時は上部、PC時は左側に配置） -->
+        <!-- 左ペイン -->
         <div id="left-pane" class="w-full flex flex-col flex-shrink-0 z-20 shadow-md transition-all duration-300">
             <!-- ヘッダー -->
             <header class="bg-emerald-500 text-white p-3 flex justify-between items-center shadow-md z-20 shrink-0">
@@ -72,7 +71,7 @@
 
             <!-- ブロックパレット -->
             <div class="p-3 bg-gray-100 border-b-4 border-gray-200 z-10 shrink-0" id="palette-area">
-                <!-- 画面モード切替（常に表示される場所に移動） -->
+                <!-- 画面モード切替 -->
                 <div class="flex bg-gray-200/80 rounded-lg p-1 mb-3 shadow-inner">
                     <button id="mode-sp" onclick="setUIMode('sp')" class="flex-1 py-1.5 text-sm font-bold rounded-md transition-all">📱 スマホ</button>
                     <button id="mode-pc" onclick="setUIMode('pc')" class="flex-1 py-1.5 text-sm font-bold rounded-md transition-all">💻 パソコン</button>
@@ -93,7 +92,7 @@
             </div>
         </div>
 
-        <!-- 右ペイン（スマホ時は下部、PC時は右側に配置） -->
+        <!-- 右ペイン -->
         <div id="right-pane" class="flex flex-col flex-1 relative bg-slate-50 overflow-hidden transition-all duration-300">
             <!-- プログラムリスト -->
             <div class="flex-1 overflow-y-auto p-4 relative" id="program-container">
@@ -456,6 +455,12 @@
         let reconnectTimer = null;
 
         async function toggleBluetooth() {
+            // ★PCでローカルファイルを直接開いている場合の警告を一番に追加
+            if (window.location.protocol === 'file:' && !navigator.userAgent.match(/(iPhone|iPod|iPad|Android)/)) {
+                alert("【注意】\nパソコンのブラウザでは、セキュリティの都合上、ファイルを直接ダブルクリックして開いた状態（file://）だとBluetoothが使えません。\n\nGitHub Pages（https://...）にアップロードしたURLから開いてください。");
+                return;
+            }
+
             if (bleDevice && bleDevice.gatt.connected) {
                 bleDevice.gatt.disconnect();
             } else {
