@@ -58,15 +58,6 @@
 
             <!-- 設定エリア -->
             <div id="settings-area" class="hidden bg-emerald-50 p-4 border-b-2 border-emerald-200 z-10 shadow-inner shrink-0">
-                <!-- 画面モード切替 -->
-                <div class="mb-5">
-                    <label class="block text-sm font-bold text-emerald-800 mb-2">がめんモード</label>
-                    <div class="flex bg-emerald-200 rounded-lg p-1">
-                        <button id="mode-sp" onclick="setUIMode('sp')" class="flex-1 py-1.5 text-sm font-bold rounded-md transition-all">スマホ</button>
-                        <button id="mode-pc" onclick="setUIMode('pc')" class="flex-1 py-1.5 text-sm font-bold rounded-md transition-all">パソコン</button>
-                    </div>
-                </div>
-
                 <div>
                     <div class="flex justify-between mb-1">
                         <label class="text-sm font-bold text-emerald-800">モーターのはやさ (0〜255)</label>
@@ -79,6 +70,12 @@
 
             <!-- ブロックパレット -->
             <div class="p-3 bg-gray-100 border-b-4 border-gray-200 z-10 shrink-0" id="palette-area">
+                <!-- 画面モード切替（常に表示される場所に移動） -->
+                <div class="flex bg-gray-200/80 rounded-lg p-1 mb-3 shadow-inner">
+                    <button id="mode-sp" onclick="setUIMode('sp')" class="flex-1 py-1.5 text-sm font-bold rounded-md transition-all">📱 スマホ</button>
+                    <button id="mode-pc" onclick="setUIMode('pc')" class="flex-1 py-1.5 text-sm font-bold rounded-md transition-all">💻 パソコン</button>
+                </div>
+
                 <div class="flex items-center justify-between bg-white rounded-xl p-2 mb-3 shadow-sm border border-gray-200">
                     <div class="text-xs font-bold text-gray-500 leading-tight">ついかするときの<br>うごくじかん</div>
                     <div class="flex items-center gap-3">
@@ -152,7 +149,11 @@
         let abortExecution = false;
         let defaultSetTime = 1.0; 
         
-        let uiMode = localStorage.getItem('rcUIMode') || 'sp'; // ★追加: モード状態を保存
+        // ★変更: 画面の横幅を自動で判定して、PCなら最初からPCモードにする
+        let uiMode = localStorage.getItem('rcUIMode');
+        if (!uiMode) {
+            uiMode = window.innerWidth >= 768 ? 'pc' : 'sp';
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             const palette = document.getElementById('palette');
@@ -201,9 +202,9 @@
                 
                 // ボタンの見た目更新
                 btnPc.classList.add('bg-white', 'shadow', 'text-emerald-700');
-                btnPc.classList.remove('text-emerald-600', 'hover:bg-emerald-100');
+                btnPc.classList.remove('text-gray-500', 'hover:bg-gray-300');
                 btnSp.classList.remove('bg-white', 'shadow', 'text-emerald-700');
-                btnSp.classList.add('text-emerald-600', 'hover:bg-emerald-100');
+                btnSp.classList.add('text-gray-500', 'hover:bg-gray-300');
             } else {
                 // スマホモード: 縦並びにして幅を制限する
                 appContainer.className = "w-full max-w-md h-full flex flex-col bg-white shadow-2xl relative mx-auto transition-all duration-300";
@@ -212,9 +213,9 @@
                 
                 // ボタンの見た目更新
                 btnSp.classList.add('bg-white', 'shadow', 'text-emerald-700');
-                btnSp.classList.remove('text-emerald-600', 'hover:bg-emerald-100');
+                btnSp.classList.remove('text-gray-500', 'hover:bg-gray-300');
                 btnPc.classList.remove('bg-white', 'shadow', 'text-emerald-700');
-                btnPc.classList.add('text-emerald-600', 'hover:bg-emerald-100');
+                btnPc.classList.add('text-gray-500', 'hover:bg-gray-300');
             }
         }
 
