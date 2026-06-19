@@ -475,6 +475,8 @@
                 } catch (error) {
                     console.error(error);
                     if (error.name !== 'NotFoundError') { 
+                        // ★変更: 詳しいエラーの原因をアラートで表示するようにしました
+                        alert("Bluetooth接続エラー: " + error.message + "\n\n【確認事項】\n1. パソコンのBluetoothが「オン」になっていますか？\n2. Chromeの設定でBluetoothの使用が許可されていますか？");
                         showToast("せつぞくしっぱい", "bg-red-500");
                     }
                 }
